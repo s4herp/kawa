@@ -19,13 +19,19 @@ toml = "0.9"
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json = "1.0.154"
 jiff = "0.2.42"
+axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["query"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net"] }
+maud = { version = "0.27.0", features = ["axum"] }
 
 [dev-dependencies]
+http-body-util = "0.1.5"
 jiff = "0.2.42"
 kawa-store = { path = "../kawa-store", features = ["test-support"] }
 kawa-testkit = { path = "../kawa-testkit" }
 mockito = "1.7.2"
 tempfile = "3"
+tower = { version = "0.5.3", features = ["util"] }
 
 [lints]
 workspace = true

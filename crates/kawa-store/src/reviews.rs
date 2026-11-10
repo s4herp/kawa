@@ -284,7 +284,7 @@ fn parse_opt(column: &'static str, value: Option<String>) -> Result<Option<Times
 
 impl Store {
     /// Login to developer id for every resolved login; excluded logins map to `None`.
-    fn login_developers(&self) -> Result<HashMap<String, Option<String>>> {
+    pub(crate) fn login_developers(&self) -> Result<HashMap<String, Option<String>>> {
         let mut statement = self
             .conn()
             .prepare("SELECT login, developer_id, excluded FROM identities WHERE login <> ''")?;
@@ -779,5 +779,123 @@ mod tests {
             None,
             "should have no aggregate without samples"
         );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrListRow {
+    pub repository_id: i64,
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub author_id: String,
+    pub day: String,
+    pub timings: PrTimings,
+}
+
+impl Store {
+    /// PRs merged or closed in the selection, newest first, optionally only
+    /// those by `author` or reviewed by `reviewer`.
+    pub fn pr_list(
+        &self,
+        selection: &Selection,
+        author: Option<&str>,
+        reviewer: Option<&str>,
+    ) -> Result<Vec<PrListRow>> {
+        let reviewed: Option<BTreeSet<(i64, i64)>> = match reviewer {
+            Some(reviewer) => Some(
+                self.review_summary(selection)?
+                    .matrix
+                    .into_iter()
+                    .filter(|cell| cell.reviewer_id == reviewer)
+                    .flat_map(|cell| cell.pull_requests)
+                    .collect(),
+            ),
+            None => None,
+        };
+        let mut statement = self.conn().prepare(
+            "SELECT t.repository_id, t.number, p.title, p.url, t.author_developer_id, t.day,
+                    t.first_commit_at, t.ready_at, t.first_response_at, t.merged_at, t.coding_seconds,
+                    t.pickup_seconds, t.review_seconds, t.cycle_seconds, t.iterations, t.is_unreviewed
+             FROM pr_timings t JOIN pull_requests p ON p.repository_id = t.repository_id AND p.number = t.number
+             WHERE t.day BETWEEN ?1 AND ?2 ORDER BY t.day DESC, t.repository_id, t.number DESC",
+        )?;
+        let rows = statement.query_map(
+            params![selection.start.to_string(), selection.end.to_string()],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    [
+                        r.get::<_, Option<String>>(6)?,
+                        r.get::<_, Option<String>>(7)?,
+                        r.get::<_, Option<String>>(8)?,
+                        r.get::<_, Option<String>>(9)?,
+                    ],
+                    [
+                        r.get::<_, Option<i64>>(10)?,
+                        r.get::<_, Option<i64>>(11)?,
+                        r.get::<_, Option<i64>>(12)?,
+                        r.get::<_, Option<i64>>(13)?,
+                    ],
+                    r.get::<_, u64>(14)?,
+                    r.get::<_, bool>(15)?,
+                ))
+            },
+        )?;
+        let mut list = Vec::new();
+        for row in rows {
+            let (
+                repository_id,
+                number,
+                title,
+                url,
+                author_id,
+                day,
+                [first, ready, response, merged],
+                [coding, pickup, review, cycle],
+                iterations,
+                unreviewed,
+            ) = row?;
+            if !selection.repositories.is_empty()
+                && !selection.repositories.contains(&repository_id)
+            {
+                continue;
+            }
+            if author.is_some_and(|a| a != author_id) {
+                continue;
+            }
+            if reviewed
+                .as_ref()
+                .is_some_and(|set| !set.contains(&(repository_id, number)))
+            {
+                continue;
+            }
+            list.push(PrListRow {
+                repository_id,
+                number,
+                title,
+                url,
+                author_id,
+                day,
+                timings: PrTimings {
+                    first_commit_at: parse_opt("first_commit_at", first)?,
+                    ready_at: parse_opt("ready_at", ready)?,
+                    first_response_at: parse_opt("first_response_at", response)?,
+                    merged_at: parse_opt("merged_at", merged)?,
+                    coding_seconds: coding,
+                    pickup_seconds: pickup,
+                    review_seconds: review,
+                    cycle_seconds: cycle,
+                    iterations,
+                    is_unreviewed: unreviewed,
+                },
+            });
+        }
+        Ok(list)
     }
 }

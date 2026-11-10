@@ -26,6 +26,17 @@ enum Command {
         #[arg(long)]
         no_wait: bool,
     },
+    /// Serve the dashboard on localhost
+    Serve {
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// Address to listen on
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: std::net::IpAddr,
+        /// Allow a non-loopback --bind address; the dashboard has no login
+        #[arg(long)]
+        allow_remote: bool,
+    },
     /// List every raw identity and the developer it resolves to
     Identities {
         #[arg(long, value_enum, default_value_t = Format::Table)]
@@ -104,6 +115,26 @@ fn run(cli: Cli) -> Result<(), String> {
                     outcomes.len()
                 ));
             }
+        }
+        Command::Serve {
+            port,
+            bind,
+            allow_remote,
+        } => {
+            kawa::web::check_bind(bind, allow_remote)?;
+            let state = std::sync::Arc::new(kawa::web::AppState {
+                store: std::sync::Mutex::new(store),
+                config,
+                clock: std::sync::Arc::new(jiff::Timestamp::now),
+            });
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+            runtime
+                .block_on(kawa::web::serve(
+                    state,
+                    std::net::SocketAddr::new(bind, port),
+                ))
+                .map_err(|e| e.to_string())?;
+            return Ok(());
         }
         Command::Identities { format } => {
             let rules = identities::rules_from_config(&config).map_err(|e| e.to_string())?;

@@ -4,3 +4,4 @@ pub mod config;
 pub mod github_sync;
 pub mod identities;
 pub mod sync;
+pub mod web;

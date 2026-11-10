@@ -7,6 +7,7 @@ mod migrations;
 mod pull_requests;
 mod reviews;
 mod sync_status;
+mod work_log;
 
 use std::path::Path;
 
@@ -20,10 +21,11 @@ pub use fundamentals::{
 pub use git_history::{BASELINE, CommitInput, FileInput, RemovalInput};
 pub use identities::{AuditRow, IdentityResolution, IdentityRow, LoginEvidenceRow};
 pub use reviews::{
-    Aggregate, AuthorReview, MatrixCell, PrDetail, PrEvent, PrTimings, ReviewSummary,
+    Aggregate, AuthorReview, MatrixCell, PrDetail, PrEvent, PrListRow, PrTimings, ReviewSummary,
     ReviewerStats, aggregate,
 };
 pub use sync_status::{SyncError, SyncErrorKind, SyncStatus};
+pub use work_log::{DayActivity, ItemKind, RepositoryRow, WorkLogItem};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
