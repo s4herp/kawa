@@ -11,6 +11,9 @@ jiff = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 thiserror = "2"
 
+[features]
+test-support = []
+
 [dev-dependencies]
 tempfile = "3"
 

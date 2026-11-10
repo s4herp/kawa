@@ -149,11 +149,18 @@ impl Config {
     }
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        let config: Self = toml::from_str(text).map_err(|error| ConfigError::Parse {
+        let mut config: Self = toml::from_str(text).map_err(|error| ConfigError::Parse {
             path: PathBuf::from(FILE_NAME),
             message: error.message().to_owned(),
         })?;
         config.validate()?;
+        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_owned());
+        if let Some(home) = home {
+            config.database = config.database.map(|p| expand_home(p, &home));
+            for repository in &mut config.repositories {
+                repository.path = expand_home(std::mem::take(&mut repository.path), &home);
+            }
+        }
         Ok(config)
     }
 
@@ -211,6 +218,13 @@ impl Config {
             }
         }
         Ok(())
+    }
+}
+
+fn expand_home(path: PathBuf, home: &Path) -> PathBuf {
+    match path.strip_prefix("~") {
+        Ok(rest) => home.join(rest),
+        Err(_) => path,
     }
 }
 
@@ -364,6 +378,21 @@ mod tests {
         assert_eq!(
             config.min_lines, 50,
             "should keep defaults for fields not set"
+        );
+    }
+
+    #[test]
+    fn tilde_paths_expand_to_the_home_directory() {
+        let home = Path::new("/home/ana");
+        assert_eq!(
+            expand_home(PathBuf::from("~/src/app"), home),
+            PathBuf::from("/home/ana/src/app"),
+            "should expand a leading ~ to the home directory"
+        );
+        assert_eq!(
+            expand_home(PathBuf::from("/src/~app"), home),
+            PathBuf::from("/src/~app"),
+            "should leave paths without a leading ~ unchanged"
         );
     }
 

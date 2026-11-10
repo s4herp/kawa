@@ -5,7 +5,10 @@ use rusqlite::Connection;
 use crate::{Result, StoreError};
 
 /// Applied in order; never edit an entry once released, add a new one.
-pub(crate) const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_initial.sql")];
+pub(crate) const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/0001_initial.sql"),
+    include_str!("migrations/0002_developers.sql"),
+];
 
 pub(crate) fn current_version(conn: &Connection) -> Result<usize> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;

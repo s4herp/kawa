@@ -1,5 +1,6 @@
 //! SQLite storage, migrations and metric queries.
 
+mod identities;
 mod migrations;
 mod sync_status;
 
@@ -8,7 +9,8 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
-pub use sync_status::{SyncErrorKind, SyncStatus};
+pub use identities::{AuditRow, IdentityResolution, IdentityRow, LoginEvidenceRow};
+pub use sync_status::{SyncError, SyncErrorKind, SyncStatus};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -69,6 +71,16 @@ impl Store {
 
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
+    }
+
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
+    /// Runs raw SQL; only for seeding test databases.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn execute_batch(&self, sql: &str) -> Result<()> {
+        Ok(self.conn.execute_batch(sql)?)
     }
 }
 
@@ -135,6 +147,8 @@ mod tests {
             "comments",
             "daily_developer_stats",
             "pr_timings",
+            "developers",
+            "developers",
         ] {
             assert!(
                 tables.iter().any(|t| t == expected),
