@@ -1,0 +1,18 @@
+[package]
+name = "kawa-store"
+description = "SQLite storage, migrations and metric queries for kawa"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+jiff = "0.2"
+rusqlite = { version = "0.37", features = ["bundled"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,0 +1,24 @@
+[package]
+name = "kawa"
+description = "Local engineering flow analytics: code fundamentals, work log and review metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kawa-core = { path = "../kawa-core" }
+kawa-github = { path = "../kawa-github" }
+kawa-store = { path = "../kawa-store" }
+directories = "6"
+globset = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

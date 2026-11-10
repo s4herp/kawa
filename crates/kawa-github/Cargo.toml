@@ -1,0 +1,12 @@
+[package]
+name = "kawa-github"
+description = "Read-only GitHub GraphQL client for pull request data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

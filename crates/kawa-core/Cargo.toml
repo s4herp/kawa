@@ -1,0 +1,12 @@
+[package]
+name = "kawa-core"
+description = "Line-survival engine, identity resolution and work-type classification for kawa"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
