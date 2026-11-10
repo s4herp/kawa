@@ -79,6 +79,14 @@ pub fn resolve_identities(store: &mut Store, config: &Config) -> Result<(), Sync
     Ok(())
 }
 
+/// Re-resolves identities and rebuilds derived tables, so config changes
+/// apply to all stored history without a new replay.
+pub fn refresh(store: &mut Store, config: &Config) -> Result<(), SyncError> {
+    resolve_identities(store, config)?;
+    store.rebuild_commit_stats(&config.timezone(), config.recency_days)?;
+    Ok(())
+}
+
 /// Replay starts `sync_window_days + recency_days` before `now`, so lines
 /// changed on the first analyzable day already have real origins.
 pub fn boundary(config: &Config, now: Timestamp) -> i64 {

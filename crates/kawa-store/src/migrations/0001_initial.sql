@@ -150,21 +150,25 @@ CREATE INDEX comments_author ON comments (author_login, created_at);
 
 -- Derived data: rebuilt for affected days after each sync, read by the dashboard.
 
-CREATE TABLE daily_developer_stats (
+-- One row per commit by a developer: local day and line counts by work type.
+CREATE TABLE commit_stats (
+    repository_id INTEGER NOT NULL,
+    sha TEXT NOT NULL,
     developer_id TEXT NOT NULL,
     day TEXT NOT NULL,
-    repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    commits INTEGER NOT NULL,
+    is_merge INTEGER NOT NULL CHECK (is_merge IN (0, 1)),
     lines_added INTEGER NOT NULL,
     lines_removed INTEGER NOT NULL,
     new_work INTEGER NOT NULL,
     legacy_refactor INTEGER NOT NULL,
     help_others INTEGER NOT NULL,
     churn INTEGER NOT NULL,
-    PRIMARY KEY (developer_id, day, repository_id)
+    PRIMARY KEY (repository_id, sha),
+    FOREIGN KEY (repository_id, sha) REFERENCES commits(repository_id, sha) ON DELETE CASCADE
 ) STRICT;
 
-CREATE INDEX daily_developer_stats_day ON daily_developer_stats (day);
+CREATE INDEX commit_stats_developer_day ON commit_stats (developer_id, day);
+CREATE INDEX commit_stats_day ON commit_stats (day);
 
 CREATE TABLE pr_timings (
     repository_id INTEGER NOT NULL,

@@ -79,3 +79,20 @@ kawa identities --format json
 ```
 
 Each row is a raw identity with its status (`developer`, `unlinked`, `excluded: bot`), the developer it resolves to, and its commits, pull requests and reviews.
+
+## Code fundamentals
+
+Fundamentals cover non-ignored commits by developers (bots excluded) whose author date falls in the selected period. Days start and end at midnight in the configured `timezone`.
+
+- **Active days**: distinct days with at least one non-merge commit, across every selected repository.
+- **Commits per active day**: non-merge commits divided by active days.
+- **Work types**: every changed line gets exactly one type.
+  - Added lines beyond the lines removed in the same hunk are **new work**. A hunk that replaces 10 lines with 30 has 10 changed lines classified by the removed lines, plus 20 lines of new work.
+  - A removed or replaced line is **churn** when its own author changes it less than `recency_days` (default 21) after writing it, **helping others** when someone else does, and **legacy refactor** when it is older, predates the analyzed history, or was written by a bot.
+- **Efficiency**: the share of changed lines that are not churn. With 100 churn lines out of 1,000 changed lines, efficiency is 90%.
+- **Impact**: `lines × L + files × F + modules × M` with the weights from `[impact]`, where L, F and M are the developer's percentile ranks among the selected developers for lines changed (added plus removed), distinct files and distinct modules. A module is the file's directory cut to `module_depth` segments; root files form module `.`. Impact is relative to the selection: it changes when the selected developers change, and values from different selections are not comparable.
+- **Insufficient data**: below `min_lines` changed lines (default 50), efficiency and impact are not shown.
+
+Work types are computed from stored history whenever kawa syncs, so changing `recency_days`, `timezone`, aliases or the bot pattern applies to all history on the next `kawa sync`.
+
+Every value can be traced to its commits: each commit lists its lines per work type and the earlier commits whose lines it rewrote.

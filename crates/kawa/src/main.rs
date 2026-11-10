@@ -65,7 +65,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let pr_outcomes =
                 github_sync::sync_pull_requests(&mut store, &config, now, &mut github)
                     .map_err(|e| e.to_string())?;
-            sync::resolve_identities(&mut store, &config).map_err(|e| e.to_string())?;
+            sync::refresh(&mut store, &config).map_err(|e| e.to_string())?;
             let mut failed = 0;
             for outcome in &pr_outcomes {
                 match outcome {

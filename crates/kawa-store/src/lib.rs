@@ -1,5 +1,6 @@
 //! SQLite storage, migrations and metric queries.
 
+mod fundamentals;
 mod git_history;
 mod identities;
 mod migrations;
@@ -11,6 +12,10 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
+pub use fundamentals::{
+    CommitEvidence, DeveloperFundamentals, ImpactSettings, RewroteLines, Selection, WorkType,
+    WorkTypes, module_of,
+};
 pub use git_history::{BASELINE, CommitInput, FileInput, RemovalInput};
 pub use identities::{AuditRow, IdentityResolution, IdentityRow, LoginEvidenceRow};
 pub use sync_status::{SyncError, SyncErrorKind, SyncStatus};
@@ -147,7 +152,7 @@ mod tests {
             "pr_events",
             "reviews",
             "comments",
-            "daily_developer_stats",
+            "commit_stats",
             "pr_timings",
             "developers",
             "developers",

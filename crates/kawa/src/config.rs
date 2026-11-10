@@ -118,6 +118,8 @@ pub enum ConfigError {
     GithubName { name: String, path: PathBuf },
     #[error("{field} must be greater than zero")]
     Zero { field: &'static str },
+    #[error("unknown timezone {name:?}: use an IANA name such as America/Santiago")]
+    Timezone { name: String },
 }
 
 impl Config {
@@ -193,6 +195,11 @@ impl Config {
                 field: "sync_window_days",
             });
         }
+        if let Some(name) = &self.timezone
+            && jiff::tz::TimeZone::get(name).is_err()
+        {
+            return Err(ConfigError::Timezone { name: name.clone() });
+        }
         regex::Regex::new(&self.bot_pattern).map_err(|error| ConfigError::BotPattern {
             pattern: self.bot_pattern.clone(),
             message: error.to_string(),
@@ -225,6 +232,26 @@ fn expand_home(path: PathBuf, home: &Path) -> PathBuf {
     match path.strip_prefix("~") {
         Ok(rest) => home.join(rest),
         Err(_) => path,
+    }
+}
+
+impl Config {
+    /// The configured timezone, or the system timezone.
+    pub fn timezone(&self) -> jiff::tz::TimeZone {
+        self.timezone
+            .as_deref()
+            .and_then(|name| jiff::tz::TimeZone::get(name).ok())
+            .unwrap_or_else(jiff::tz::TimeZone::system)
+    }
+
+    pub fn impact_settings(&self) -> kawa_store::ImpactSettings {
+        kawa_store::ImpactSettings {
+            lines: self.impact.lines,
+            files: self.impact.files,
+            modules: self.impact.modules,
+            module_depth: self.module_depth,
+            min_lines: self.min_lines,
+        }
     }
 }
 
@@ -421,6 +448,17 @@ mod tests {
                 Err(ConfigError::ExcludeGlob { .. })
             ),
             "should reject an invalid exclude glob"
+        );
+    }
+
+    #[test]
+    fn unknown_timezone_is_rejected() {
+        assert!(
+            matches!(
+                Config::parse("timezone = \"Mars/Olympus\"\n"),
+                Err(ConfigError::Timezone { .. })
+            ),
+            "should reject a timezone that is not an IANA name"
         );
     }
 
