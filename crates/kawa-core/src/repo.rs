@@ -31,6 +31,7 @@ pub fn branch_tip<'r>(
         Some(name) if name.starts_with("refs/") => vec![name.to_owned()],
         Some(name) => vec![
             format!("refs/heads/{name}"),
+            format!("refs/remotes/{name}"),
             format!("refs/remotes/origin/{name}"),
         ],
         None => vec!["refs/remotes/origin/HEAD".to_owned(), "HEAD".to_owned()],
