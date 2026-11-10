@@ -64,20 +64,6 @@ impl Store {
         Ok(())
     }
 
-    /// Adds commits and removal pairs from an incremental replay. Removal
-    /// pairs for an existing (introduced, removed) key add their lines.
-    pub fn append_git_history(
-        &mut self,
-        repository_id: i64,
-        commits: &[CommitInput],
-        removals: &[RemovalInput],
-    ) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
-        insert_history(&tx, repository_id, commits, removals)?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn commit_count(&self, repository_id: i64) -> Result<u64> {
         Ok(self.conn().query_row(
             "SELECT COUNT(*) FROM commits WHERE repository_id = ?1",
@@ -147,9 +133,7 @@ fn insert_history(
     }
     let mut removal = tx.prepare(
         "INSERT INTO line_removals (repository_id, introduced_sha, removed_sha, lines)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT (repository_id, introduced_sha, removed_sha)
-         DO UPDATE SET lines = lines + excluded.lines",
+         VALUES (?1, ?2, ?3, ?4)",
     )?;
     for input in removals {
         removal.execute(params![

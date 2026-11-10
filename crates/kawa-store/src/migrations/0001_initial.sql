@@ -18,13 +18,6 @@ CREATE TABLE sync_status (
     error_at TEXT
 ) STRICT;
 
--- Serialized line-origin state so later syncs replay only new commits.
-CREATE TABLE engine_snapshots (
-    repository_id INTEGER PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE,
-    head TEXT NOT NULL,
-    data BLOB NOT NULL
-) STRICT;
-
 -- Raw identities as they appear in git (name + email) or GitHub (login).
 CREATE TABLE identities (
     id INTEGER PRIMARY KEY,

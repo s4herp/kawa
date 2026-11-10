@@ -137,7 +137,6 @@ mod tests {
         for expected in [
             "repositories",
             "sync_status",
-            "engine_snapshots",
             "identities",
             "commits",
             "commit_files",
