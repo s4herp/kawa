@@ -83,7 +83,9 @@ pub fn resolve_identities(store: &mut Store, config: &Config) -> Result<(), Sync
 /// apply to all stored history without a new replay.
 pub fn refresh(store: &mut Store, config: &Config) -> Result<(), SyncError> {
     resolve_identities(store, config)?;
-    store.rebuild_commit_stats(&config.timezone(), config.recency_days)?;
+    let timezone = config.timezone();
+    store.rebuild_commit_stats(&timezone, config.recency_days)?;
+    store.rebuild_pr_timings(&timezone)?;
     Ok(())
 }
 

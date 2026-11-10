@@ -173,6 +173,10 @@ CREATE INDEX commit_stats_day ON commit_stats (day);
 CREATE TABLE pr_timings (
     repository_id INTEGER NOT NULL,
     number INTEGER NOT NULL,
+    author_developer_id TEXT NOT NULL,
+    -- Local day the PR was merged or closed; the period filter uses it.
+    day TEXT NOT NULL,
+    is_merged INTEGER NOT NULL CHECK (is_merged IN (0, 1)),
     first_commit_at TEXT,
     ready_at TEXT,
     first_response_at TEXT,
@@ -186,3 +190,18 @@ CREATE TABLE pr_timings (
     PRIMARY KEY (repository_id, number),
     FOREIGN KEY (repository_id, number) REFERENCES pull_requests(repository_id, number) ON DELETE CASCADE
 ) STRICT;
+
+CREATE INDEX pr_timings_day ON pr_timings (day);
+
+-- Reviewer reaction times and author response times, one row per sample.
+CREATE TABLE pr_response_samples (
+    repository_id INTEGER NOT NULL,
+    number INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('reaction', 'responsiveness')),
+    developer_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    seconds INTEGER NOT NULL,
+    FOREIGN KEY (repository_id, number) REFERENCES pull_requests(repository_id, number) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX pr_response_samples_pr ON pr_response_samples (repository_id, number);

@@ -5,6 +5,7 @@ mod git_history;
 mod identities;
 mod migrations;
 mod pull_requests;
+mod reviews;
 mod sync_status;
 
 use std::path::Path;
@@ -18,6 +19,10 @@ pub use fundamentals::{
 };
 pub use git_history::{BASELINE, CommitInput, FileInput, RemovalInput};
 pub use identities::{AuditRow, IdentityResolution, IdentityRow, LoginEvidenceRow};
+pub use reviews::{
+    Aggregate, AuthorReview, MatrixCell, PrDetail, PrEvent, PrTimings, ReviewSummary,
+    ReviewerStats, aggregate,
+};
 pub use sync_status::{SyncError, SyncErrorKind, SyncStatus};
 
 #[derive(Debug, Error)]

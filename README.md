@@ -96,3 +96,20 @@ Fundamentals cover non-ignored commits by developers (bots excluded) whose autho
 Work types are computed from stored history whenever kawa syncs, so changing `recency_days`, `timezone`, aliases or the bot pattern applies to all history on the next `kawa sync`.
 
 Every value can be traced to its commits: each commit lists its lines per work type and the earlier commits whose lines it rewrote.
+
+## Review and collaboration
+
+Review metrics cover pull requests merged or closed in the selected period (by local day). PRs opened by bots are left out, and comments or reviews by bots never count as a response.
+
+- **Ready for review**: when the PR was opened, or, for a PR opened as a draft, when it was first marked ready. Time spent as a draft before that is not measured.
+- **Cycle time**: first commit to merge, split into
+  - **coding**: first commit to ready for review;
+  - **pickup** (also the time to first comment): ready for review to the first review or comment by someone other than the author;
+  - **review**: that first response to merge.
+- **Unreviewed**: merged with no review or comment from anyone but the author. Reported per author as a count and a share of merged PRs.
+- **Reviewer reaction time**: from when a reviewer was requested (or from ready for review, when never requested) to their first review or comment on that PR.
+- **Author responsiveness**: from a review or comment by someone else to the author's next commit on the PR or reply. GitHub does not report push times reliably, so the commit's committer date stands in for it.
+- **Iterations**: review rounds by others that were followed by at least one new commit from the author before merge.
+- **Who reviews whom**: for each reviewer and author, the PRs the reviewer submitted a review on.
+
+Timings are reported as median and 75th percentile (nearest rank) in calendar hours, with the number of PRs they come from. Each PR shows the events its timings were computed from: commits, ready and draft changes, review requests, reviews, comments and the merge, with times and actors.
