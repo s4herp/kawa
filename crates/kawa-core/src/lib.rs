@@ -3,3 +3,6 @@
 pub mod engine;
 pub mod identity;
 pub mod repo;
+
+/// Re-exported so callers use the same gix version as the engine.
+pub use gix;

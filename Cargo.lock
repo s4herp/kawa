@@ -1414,6 +1414,7 @@ dependencies = [
  "clap",
  "directories",
  "globset",
+ "jiff",
  "kawa-core",
  "kawa-github",
  "kawa-store",

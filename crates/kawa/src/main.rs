@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use kawa::config::Config;
 use kawa::identities;
+use kawa::sync::{self, RepositoryOutcome};
 use kawa_store::Store;
 
 #[derive(Parser)]
@@ -18,6 +19,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Read git history of every configured repository into the local database
+    Sync,
     /// List every raw identity and the developer it resolves to
     Identities {
         #[arg(long, value_enum, default_value_t = Format::Table)]
@@ -46,6 +49,32 @@ fn run(cli: Cli) -> Result<(), String> {
     let config = Config::load(cli.config.as_deref()).map_err(|e| e.to_string())?;
     let mut store = open_store(&config)?;
     match cli.command {
+        Command::Sync => {
+            let outcomes = sync::sync_git(&mut store, &config, jiff::Timestamp::now())
+                .map_err(|e| e.to_string())?;
+            let mut failed = 0;
+            for outcome in &outcomes {
+                match outcome {
+                    RepositoryOutcome::Synced {
+                        path,
+                        head,
+                        commits,
+                    } => {
+                        println!("synced {path} at {}: {commits} commits", &head[..12]);
+                    }
+                    RepositoryOutcome::Failed { path, error } => {
+                        failed += 1;
+                        eprintln!("failed {path}: {error}");
+                    }
+                }
+            }
+            if failed > 0 {
+                return Err(format!(
+                    "{failed} of {} repositories failed",
+                    outcomes.len()
+                ));
+            }
+        }
         Command::Identities { format } => {
             let rules = identities::rules_from_config(&config).map_err(|e| e.to_string())?;
             identities::resolve(&mut store, &rules, &identities::developer_specs(&config))

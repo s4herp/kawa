@@ -1,5 +1,6 @@
 //! SQLite storage, migrations and metric queries.
 
+mod git_history;
 mod identities;
 mod migrations;
 mod sync_status;
@@ -9,6 +10,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
+pub use git_history::{BASELINE, CommitInput, FileInput, RemovalInput};
 pub use identities::{AuditRow, IdentityResolution, IdentityRow, LoginEvidenceRow};
 pub use sync_status::{SyncError, SyncErrorKind, SyncStatus};
 
