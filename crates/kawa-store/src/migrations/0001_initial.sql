@@ -53,7 +53,9 @@ CREATE TABLE commits (
 CREATE INDEX commits_author_at ON commits (author_at);
 CREATE INDEX commits_author_identity ON commits (author_identity_id, author_at);
 
--- Per file and commit: line counts and the work-type classification of changed lines.
+-- Per file and commit: line counts. Added lines that do not replace a removed
+-- line in the same hunk are new work; removed lines are classified at query
+-- time from line_removals, so recency and identity changes need no replay.
 CREATE TABLE commit_files (
     repository_id INTEGER NOT NULL,
     sha TEXT NOT NULL,
@@ -62,23 +64,18 @@ CREATE TABLE commit_files (
     lines_added INTEGER NOT NULL,
     lines_removed INTEGER NOT NULL,
     new_work INTEGER NOT NULL,
-    legacy_refactor INTEGER NOT NULL,
-    help_others INTEGER NOT NULL,
-    churn INTEGER NOT NULL,
     PRIMARY KEY (repository_id, sha, path),
     FOREIGN KEY (repository_id, sha) REFERENCES commits(repository_id, sha) ON DELETE CASCADE
 ) STRICT;
 
--- Lines introduced by one commit and removed by another, aggregated per pair.
+-- Lines introduced by one commit and first removed by another, aggregated per
+-- pair. introduced_sha is 'baseline' for lines older than the replay boundary.
 CREATE TABLE line_removals (
     repository_id INTEGER NOT NULL,
     introduced_sha TEXT NOT NULL,
     removed_sha TEXT NOT NULL,
     lines INTEGER NOT NULL,
-    min_age_days INTEGER NOT NULL,
-    max_age_days INTEGER NOT NULL,
     PRIMARY KEY (repository_id, introduced_sha, removed_sha),
-    FOREIGN KEY (repository_id, introduced_sha) REFERENCES commits(repository_id, sha) ON DELETE CASCADE,
     FOREIGN KEY (repository_id, removed_sha) REFERENCES commits(repository_id, sha) ON DELETE CASCADE
 ) STRICT;
 

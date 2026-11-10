@@ -57,11 +57,30 @@ pub fn branch_tip<'r>(
 
 /// Returns the `.mailmap` content committed at `commit`, if any.
 pub fn mailmap_at(commit: &gix::Commit<'_>) -> Result<Option<Vec<u8>>, RepoError> {
+    file_at(commit, ".mailmap")
+}
+
+/// Commit ids listed in `.git-blame-ignore-revs` at `commit`. Comments,
+/// blank lines and entries that are not full hex ids are skipped.
+pub fn ignore_revs_at(
+    commit: &gix::Commit<'_>,
+) -> Result<std::collections::HashSet<gix::ObjectId>, RepoError> {
+    let Some(data) = file_at(commit, ".git-blame-ignore-revs")? else {
+        return Ok(Default::default());
+    };
+    Ok(String::from_utf8_lossy(&data)
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or("").trim())
+        .filter_map(|hex| gix::ObjectId::from_hex(hex.as_bytes()).ok())
+        .collect())
+}
+
+fn file_at(commit: &gix::Commit<'_>, path: &str) -> Result<Option<Vec<u8>>, RepoError> {
     let tree = commit
         .tree()
         .map_err(|error| RepoError::Object(error.to_string()))?;
     let Some(entry) = tree
-        .lookup_entry_by_path(".mailmap")
+        .lookup_entry_by_path(path)
         .map_err(|error| RepoError::Object(error.to_string()))?
     else {
         return Ok(None);
