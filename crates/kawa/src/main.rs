@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use kawa::config::Config;
+use kawa::github_sync::{self, GithubSync, PrOutcome};
 use kawa::identities;
 use kawa::sync::{self, RepositoryOutcome};
 use kawa_store::Store;
@@ -19,8 +20,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Read git history of every configured repository into the local database
-    Sync,
+    /// Read git history and GitHub pull requests into the local database
+    Sync {
+        /// Stop instead of waiting when the GitHub rate limit is exhausted
+        #[arg(long)]
+        no_wait: bool,
+    },
     /// List every raw identity and the developer it resolves to
     Identities {
         #[arg(long, value_enum, default_value_t = Format::Table)]
@@ -49,10 +54,35 @@ fn run(cli: Cli) -> Result<(), String> {
     let config = Config::load(cli.config.as_deref()).map_err(|e| e.to_string())?;
     let mut store = open_store(&config)?;
     match cli.command {
-        Command::Sync => {
-            let outcomes = sync::sync_git(&mut store, &config, jiff::Timestamp::now())
-                .map_err(|e| e.to_string())?;
+        Command::Sync { no_wait } => {
+            let now = jiff::Timestamp::now();
+            let outcomes = sync::sync_git(&mut store, &config, now).map_err(|e| e.to_string())?;
+            let mut github = GithubSync {
+                token: github_sync::discover_token(),
+                api_url: kawa_github::DEFAULT_API_URL.to_owned(),
+                wait: github_sync::wait_policy(no_wait),
+            };
+            let pr_outcomes =
+                github_sync::sync_pull_requests(&mut store, &config, now, &mut github)
+                    .map_err(|e| e.to_string())?;
+            sync::resolve_identities(&mut store, &config).map_err(|e| e.to_string())?;
             let mut failed = 0;
+            for outcome in &pr_outcomes {
+                match outcome {
+                    PrOutcome::Synced {
+                        path,
+                        pull_requests,
+                    } => {
+                        println!("synced {path}: {pull_requests} pull requests updated");
+                    }
+                    PrOutcome::NotConfigured { .. } => {}
+                    PrOutcome::Skipped { path, reason } => eprintln!("skipped {path}: {reason}"),
+                    PrOutcome::Failed { path, error } => {
+                        failed += 1;
+                        eprintln!("failed {path} pull requests: {error}");
+                    }
+                }
+            }
             for outcome in &outcomes {
                 match outcome {
                     RepositoryOutcome::Synced {

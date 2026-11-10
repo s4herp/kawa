@@ -3,6 +3,7 @@
 mod git_history;
 mod identities;
 mod migrations;
+mod pull_requests;
 mod sync_status;
 
 use std::path::Path;

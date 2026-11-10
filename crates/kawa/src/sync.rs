@@ -34,8 +34,8 @@ pub enum RepositoryOutcome {
     },
 }
 
-/// Syncs git history for every configured repository, then re-resolves
-/// identities. A repository that fails is recorded and the others continue.
+/// Syncs git history for every configured repository. A repository that
+/// fails is recorded and the others continue.
 pub fn sync_git(
     store: &mut Store,
     config: &Config,
@@ -69,9 +69,14 @@ pub fn sync_git(
             }
         }
     }
+    Ok(outcomes)
+}
+
+/// Re-resolves every stored identity against the current config and mailmaps.
+pub fn resolve_identities(store: &mut Store, config: &Config) -> Result<(), SyncError> {
     let rules = identities::rules_from_config(config)?;
     identities::resolve(store, &rules, &identities::developer_specs(config))?;
-    Ok(outcomes)
+    Ok(())
 }
 
 /// Replay starts `sync_window_days + recency_days` before `now`, so lines

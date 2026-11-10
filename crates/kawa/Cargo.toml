@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 kawa-core = { path = "../kawa-core" }
-kawa-github = { path = "../kawa-github" }
+kawa-github = { version = "0.1.0", path = "../kawa-github" }
 kawa-store = { path = "../kawa-store" }
 directories = "6"
 globset = "0.4"
@@ -24,6 +24,7 @@ jiff = "0.2.42"
 jiff = "0.2.42"
 kawa-store = { path = "../kawa-store", features = ["test-support"] }
 kawa-testkit = { path = "../kawa-testkit" }
+mockito = "1.7.2"
 tempfile = "3"
 
 [lints]
