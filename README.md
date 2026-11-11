@@ -4,6 +4,63 @@ Local engineering flow analytics for git repositories and their GitHub pull requ
 
 kawa shows activity patterns and the commits and pull requests behind every number. It does not rank people and is not a performance evaluation.
 
+## How it works
+
+```mermaid
+flowchart TD
+    config["kawa.toml<br/>repositories, identities, exclusions"]
+    github[("GitHub<br/>GraphQL API and pull request heads")]
+    clone[("Your clone<br/>read only")]
+
+    subgraph sync["kawa sync"]
+        direction TB
+        prs["1. Pull requests<br/>commits, reviews, comments, events"]
+        heads["2. Pull request heads<br/>bare cache that borrows the clone's objects"]
+        replay["3. Line-origin replay<br/>who introduced each line, who removed it and when"]
+        identities["4. Identities<br/>emails and logins become one developer"]
+        derived["5. Derived tables<br/>work types per commit, timings per pull request"]
+        prs --> heads --> replay --> identities --> derived
+    end
+
+    db[("SQLite<br/>one file")]
+
+    subgraph serve["kawa serve (localhost)"]
+        direction TB
+        fundamentals["Fundamentals<br/>impact, efficiency, work mix"]
+        worklog["Work log<br/>activity per person and day"]
+        reviews["Reviews<br/>cycle time, pickup, who reviews whom"]
+        evidence["Evidence<br/>the commits and pull requests behind each number"]
+        fundamentals --> evidence
+        worklog --> evidence
+        reviews --> evidence
+    end
+
+    config --> sync
+    github --> prs
+    github --> heads
+    clone --> replay
+    sync --> db --> serve
+```
+
+1. **Pull requests.** `kawa sync` reads pull requests updated since the last sync through the GitHub GraphQL API.
+2. **Pull request heads.** A squash merge leaves one commit on the branch, so kawa downloads the last pushed head of each merged pull request into a cache next to the database. Your clone is never written to.
+3. **Replay.** The engine walks the commit graph once, oldest first, and keeps the origin of every line. When a commit removes or rewrites a line, kawa records which commit introduced it. Squash commits are replayed through the commits of their pull request.
+4. **Identities.** Mailmap, config aliases and GitHub logins fold the addresses of one person into one developer; bots are excluded.
+5. **Derived tables.** Each changed line is classified as new work, legacy refactor, helping others or churn from the age and author of the line it replaced. Pull request timings come from their events.
+
+`kawa serve` then renders the dashboard from the SQLite file, with no JavaScript and bound to localhost. Every number links to the commits or pull requests behind it. The dashboard is in Spanish.
+
+## Usage
+
+```sh
+cargo install --path crates/kawa
+kawa --config kawa.toml sync     # read git and GitHub into SQLite
+kawa --config kawa.toml serve    # dashboard at http://127.0.0.1:7878
+kawa --config kawa.toml identities   # audit how identities were resolved
+```
+
+`sync` takes a GitHub token from `GITHUB_TOKEN` or from `gh auth token`. Without one, pull request metrics are skipped and the git metrics still work.
+
 ## Configuration
 
 kawa reads `kawa.toml` from the platform config directory (`~/Library/Application Support/kawa/kawa.toml` on macOS, `~/.config/kawa/kawa.toml` on Linux) or from the path given with `--config`. A missing default file means every default applies; a missing file passed with `--config` is an error. Unknown keys are rejected so typos do not pass silently.
