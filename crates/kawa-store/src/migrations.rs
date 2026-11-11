@@ -8,6 +8,7 @@ use crate::{Result, StoreError};
 pub(crate) const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_initial.sql"),
     include_str!("migrations/0002_developers.sql"),
+    include_str!("migrations/0003_pr_window_start.sql"),
 ];
 
 pub(crate) fn current_version(conn: &Connection) -> Result<usize> {

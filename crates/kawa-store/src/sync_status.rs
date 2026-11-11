@@ -34,6 +34,8 @@ pub struct SyncStatus {
     pub git_head: Option<String>,
     pub pr_synced_at: Option<Timestamp>,
     pub pr_high_water_mark: Option<Timestamp>,
+    /// Oldest `updatedAt` the stored pull requests are complete from.
+    pub pr_window_start: Option<Timestamp>,
     pub error: Option<SyncError>,
 }
 
@@ -60,23 +62,32 @@ impl Store {
         Ok(())
     }
 
-    /// Records a successful pull request sync up to `high_water_mark` (the
-    /// latest `updatedAt` stored) and clears a previous GitHub error.
+    /// Records a successful pull request sync that covers `window_start` up
+    /// to `high_water_mark` (the latest `updatedAt` stored) and clears a
+    /// previous GitHub error.
     pub fn record_pr_sync(
         &self,
         repository_id: i64,
         at: Timestamp,
         high_water_mark: Timestamp,
+        window_start: Timestamp,
     ) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO sync_status (repository_id, pr_synced_at, pr_high_water_mark) VALUES (?1, ?2, ?3)
+            "INSERT INTO sync_status (repository_id, pr_synced_at, pr_high_water_mark, pr_window_start)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (repository_id) DO UPDATE SET
                pr_synced_at = excluded.pr_synced_at,
                pr_high_water_mark = excluded.pr_high_water_mark,
+               pr_window_start = excluded.pr_window_start,
                error_kind = CASE WHEN error_kind = 'github' THEN NULL ELSE error_kind END,
                error_message = CASE WHEN error_kind = 'github' THEN NULL ELSE error_message END,
                error_at = CASE WHEN error_kind = 'github' THEN NULL ELSE error_at END",
-            (repository_id, at.to_string(), high_water_mark.to_string()),
+            (
+                repository_id,
+                at.to_string(),
+                high_water_mark.to_string(),
+                window_start.to_string(),
+            ),
         )?;
         Ok(())
     }
@@ -107,7 +118,7 @@ impl Store {
             .conn()
             .query_row(
                 "SELECT git_synced_at, git_head, pr_synced_at, pr_high_water_mark,
-                        error_kind, error_message, error_at
+                        error_kind, error_message, error_at, pr_window_start
                  FROM sync_status WHERE repository_id = ?1",
                 [repository_id],
                 RawStatus::from_row,
@@ -122,6 +133,7 @@ struct RawStatus {
     git_head: Option<String>,
     pr_synced_at: Option<String>,
     pr_high_water_mark: Option<String>,
+    pr_window_start: Option<String>,
     error_kind: Option<String>,
     error_message: Option<String>,
     error_at: Option<String>,
@@ -137,6 +149,7 @@ impl RawStatus {
             error_kind: row.get(4)?,
             error_message: row.get(5)?,
             error_at: row.get(6)?,
+            pr_window_start: row.get(7)?,
         })
     }
 
@@ -165,6 +178,10 @@ impl RawStatus {
             pr_high_water_mark: self
                 .pr_high_water_mark
                 .map(|v| parse_timestamp("pr_high_water_mark", v))
+                .transpose()?,
+            pr_window_start: self
+                .pr_window_start
+                .map(|v| parse_timestamp("pr_window_start", v))
                 .transpose()?,
             error,
         })
@@ -210,7 +227,12 @@ mod tests {
             .record_git_sync(id, ts("2026-11-10T12:00:00Z"), "abc123")
             .unwrap();
         store
-            .record_pr_sync(id, ts("2026-11-10T12:05:00Z"), ts("2026-11-10T11:59:00Z"))
+            .record_pr_sync(
+                id,
+                ts("2026-11-10T12:05:00Z"),
+                ts("2026-11-10T11:59:00Z"),
+                ts("2026-08-12T12:05:00Z"),
+            )
             .unwrap();
 
         let status = store.sync_status(id).unwrap();
@@ -280,7 +302,12 @@ mod tests {
         );
 
         store
-            .record_pr_sync(id, ts("2026-11-10T13:05:00Z"), ts("2026-11-10T13:00:00Z"))
+            .record_pr_sync(
+                id,
+                ts("2026-11-10T13:05:00Z"),
+                ts("2026-11-10T13:00:00Z"),
+                ts("2026-08-12T12:05:00Z"),
+            )
             .unwrap();
         assert_eq!(
             store.sync_status(id).unwrap().error,

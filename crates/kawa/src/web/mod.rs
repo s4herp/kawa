@@ -84,6 +84,8 @@ impl Filters {
         let days = match self.period.as_deref() {
             Some("7") => Some(7),
             Some("90") => Some(90),
+            Some("180") => Some(180),
+            Some("365") => Some(365),
             Some("custom") => None,
             _ => Some(30),
         };

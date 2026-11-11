@@ -356,3 +356,73 @@ fn bot_actors_get_the_bot_suffix() {
         "should mark Bot actors so the bot pattern excludes them"
     );
 }
+
+#[test]
+fn longer_window_fetches_again_from_its_start() {
+    let mut server = Server::new();
+    let mut store = Store::open_in_memory().unwrap();
+    let sync = |store: &mut Store, server: &Server, days: u32| {
+        let mut options = GithubSync {
+            token: Some(TOKEN.to_owned()),
+            api_url: format!("{}/graphql", server.url()),
+            wait: Box::new(|_| true),
+        };
+        let config = Config {
+            sync_window_days: days,
+            ..config()
+        };
+        github_sync::sync_pull_requests(store, &config, now(), &mut options).unwrap()
+    };
+    let pages = || {
+        page(
+            vec![
+                pr(7, "recent", "2026-11-09T00:00:00Z"),
+                pr(6, "two weeks old", "2026-10-27T00:00:00Z"),
+            ],
+            None,
+            4000,
+        )
+    };
+
+    let first = server.mock("POST", "/graphql").with_body(pages()).create();
+    sync(&mut store, &server, 7);
+    first.remove();
+    assert_eq!(
+        store.pull_request_titles(1).unwrap(),
+        vec![(7, "recent".to_owned())],
+        "should stop at the 7-day window on the first sync"
+    );
+
+    let second = server.mock("POST", "/graphql").with_body(pages()).create();
+    sync(&mut store, &server, 30);
+    second.remove();
+    assert_eq!(
+        store.pull_request_titles(1).unwrap().len(),
+        2,
+        "should fetch the older pull request once the window grows past the last sync"
+    );
+    let covered = store.sync_status(1).unwrap().pr_window_start;
+    assert_eq!(
+        covered,
+        Some("2026-10-11T12:00:00Z".parse().unwrap()),
+        "should remember the start of the longer window"
+    );
+
+    let third = server
+        .mock("POST", "/graphql")
+        .with_body(page(
+            vec![pr(6, "must not be read again", "2026-10-27T00:00:00Z")],
+            None,
+            4000,
+        ))
+        .create();
+    sync(&mut store, &server, 30);
+    third.remove();
+    assert!(
+        store
+            .pull_request_titles(1)
+            .unwrap()
+            .contains(&(6, "two weeks old".to_owned())),
+        "should continue from the last sync while the window is covered"
+    );
+}

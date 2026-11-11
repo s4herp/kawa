@@ -114,9 +114,15 @@ pub fn sync_pull_requests(
             repository.branch.as_deref(),
             repository.github.as_deref(),
         )?;
-        let previous = store.sync_status(repository_id)?.pr_high_water_mark;
+        let status = store.sync_status(repository_id)?;
         let window_start =
             now - SignedDuration::from_hours(24 * i64::from(config.sync_window_days));
+        // Pull requests older than the stored window were never fetched, so a
+        // longer window starts over instead of continuing from the last sync.
+        let covered_from = status
+            .pr_window_start
+            .filter(|start| *start <= window_start);
+        let previous = status.pr_high_water_mark.filter(|_| covered_from.is_some());
         let since = previous.unwrap_or(window_start);
 
         let mut stored = 0u64;
@@ -145,7 +151,12 @@ pub fn sync_pull_requests(
         }
         match result {
             Ok(()) => {
-                store.record_pr_sync(repository_id, now, high_water)?;
+                store.record_pr_sync(
+                    repository_id,
+                    now,
+                    high_water,
+                    covered_from.unwrap_or(window_start),
+                )?;
                 outcomes.push(PrOutcome::Synced {
                     path,
                     pull_requests: stored,

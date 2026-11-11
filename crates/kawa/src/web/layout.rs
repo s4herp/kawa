@@ -211,7 +211,7 @@ pub fn render(store: &Store, now: jiff::Timestamp, page: &Page<'_>, body: Markup
                         }
                         label { "Período"
                             select name="period" {
-                                @for (value, label) in [("7", "Últimos 7 días"), ("30", "Últimos 30 días"), ("90", "Últimos 90 días"), ("custom", "Personalizado")] {
+                                @for (value, label) in [("7", "Últimos 7 días"), ("30", "Últimos 30 días"), ("90", "Últimos 90 días"), ("180", "Últimos 180 días"), ("365", "Último año"), ("custom", "Personalizado")] {
                                     option value=(value) selected[period == value] { (label) }
                                 }
                             }
