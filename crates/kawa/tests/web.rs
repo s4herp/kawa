@@ -195,7 +195,7 @@ async fn filtered_url_renders_the_same_view_again() {
         "should keep the custom start in the form"
     );
     assert!(
-        first.contains("<option value=\"ana@example.com\" selected"),
+        first.contains("name=\"dev\" value=\"ana@example.com\" checked"),
         "should keep the developer filter"
     );
     let table = first.split("<tbody>").nth(1).expect("table rendered");
@@ -284,7 +284,7 @@ async fn work_log_grid_and_cells() {
         "should have one row per developer with activity"
     );
     assert!(
-        rows.contains("C1 O1"),
+        rows.contains("</i>C1</span><span class=\"chip\"><i class=\"s2\"></i>O1</span>"),
         "should count Ana's commit and opened PR on the same day"
     );
 

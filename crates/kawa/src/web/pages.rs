@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use kawa_store::{Aggregate, ItemKind, Selection, Store, WorkType, WorkTypes};
 
-use super::charts::{self, Point};
+use super::charts::{self, Point, STAGES, Segment, WORK};
 use super::layout::{self, Page};
 use super::{AppState, Filters, MAX_WORK_LOG_DAYS};
 use crate::identities;
@@ -35,6 +35,82 @@ fn metric(href: String, text: impl Into<String>) -> Markup {
     html! { a.metric href=(href) { (text.into()) } }
 }
 
+/// Whole number with thousands separators.
+fn num(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn tile(label: &str, value: Markup) -> Markup {
+    html! { div.tile { div.tile-label { (label) } div.tile-value { (value) } } }
+}
+
+fn work_values(w: &WorkTypes) -> [u64; 4] {
+    [w.new_work, w.legacy_refactor, w.help_others, w.churn]
+}
+
+fn work_segments(w: &WorkTypes) -> Vec<Segment> {
+    work_values(w)
+        .iter()
+        .zip(WORK)
+        .map(|(value, (label, class))| Segment {
+            label,
+            class,
+            value: *value as f64,
+            text: format!("{} lines", num(*value)),
+        })
+        .collect()
+}
+
+fn sum_work<'a>(items: impl IntoIterator<Item = &'a WorkTypes>) -> WorkTypes {
+    items.into_iter().fold(WorkTypes::default(), |mut t, w| {
+        t.new_work += w.new_work;
+        t.legacy_refactor += w.legacy_refactor;
+        t.help_others += w.help_others;
+        t.churn += w.churn;
+        t
+    })
+}
+
+/// The work mix bar with its legend, each entry carrying its share.
+fn work_mix(w: &WorkTypes) -> Markup {
+    let shares = w.shares().unwrap_or_default();
+    let labels: Vec<String> = WORK
+        .iter()
+        .zip(shares)
+        .map(|((label, _), share)| format!("{label} {}", pct(share)))
+        .collect();
+    let items: Vec<(&str, &str)> = labels
+        .iter()
+        .zip(WORK)
+        .map(|(label, (_, class))| (label.as_str(), class))
+        .collect();
+    html! {
+        div.tall { (charts::stack(&work_segments(w))) }
+        (charts::legend(&items))
+    }
+}
+
+fn stage_segments(stages: [Option<Aggregate>; 3]) -> Vec<Segment> {
+    stages
+        .iter()
+        .zip(STAGES)
+        .map(|(stage, (label, class))| Segment {
+            label,
+            class,
+            value: stage.map_or(0.0, |a| a.median),
+            text: stage.map_or("–".into(), |a| duration(a.median)),
+        })
+        .collect()
+}
+
 fn pct(value: f64) -> String {
     format!("{:.0}%", value * 100.0)
 }
@@ -43,10 +119,25 @@ fn hours(seconds: f64) -> String {
     format!("{:.1} h", seconds / 3600.0)
 }
 
-fn agg(value: Option<Aggregate>) -> String {
+fn duration(seconds: f64) -> String {
+    let minutes = seconds / 60.0;
+    if minutes < 60.0 {
+        format!("{minutes:.0} min")
+    } else if minutes < 48.0 * 60.0 {
+        format!("{:.1} h", minutes / 60.0)
+    } else {
+        format!("{:.1} d", minutes / 1440.0)
+    }
+}
+
+/// Median as the headline, 75th percentile and sample size underneath.
+fn metric_agg(href: String, value: Option<Aggregate>) -> Markup {
     match value {
-        Some(a) => format!("{} · p75 {} · n {}", hours(a.median), hours(a.p75), a.n),
-        None => "–".into(),
+        Some(a) => html! {
+            a.metric href=(href) { (duration(a.median)) }
+            span.sub { "p75 " (duration(a.p75)) " · n " (a.n) }
+        },
+        None => html! { a.metric href=(href) { "–" } },
     }
 }
 
@@ -127,37 +218,53 @@ pub async fn overview(State(state): S, Query(filters): Query<Filters>) -> Markup
                 .filter(|r| r.impact.is_none())
                 .map(|r| r.name.as_str())
                 .collect();
+            let total = sum_work(rows.iter().map(|r| &r.work));
+            let commits: u64 = rows.iter().map(|r| r.commits).sum();
             html! {
                 @if rows.is_empty() {
                     p { "No commits in this period." }
                 } @else {
-                    (charts::quadrant(&points))
-                    p.note {
-                        "Each point is a developer's pattern of activity in this selection, split at the medians. "
-                        "This chart is not a performance evaluation: design, incidents, reviews and helping others "
-                        "often leave few lines behind."
+                    div.tiles {
+                        (tile("Developers", html! { (rows.len()) }))
+                        (tile("Commits", html! { (num(commits)) }))
+                        (tile("Changed lines", html! { (num(total.changed())) }))
+                        (tile("Efficiency", html! { (total.efficiency().map_or("–".into(), pct)) }))
                     }
-                    @if !insufficient.is_empty() {
-                        p.note { "Not plotted, insufficient data (fewer than " (settings.min_lines) " changed lines): " (insufficient.join(", ")) }
+                    div.card {
+                        h2 { "Work mix" }
+                        (work_mix(&total))
+                    }
+                    div.card {
+                        h2 { "Impact and efficiency" }
+                        (charts::quadrant(&points))
+                        p.note {
+                            "Each point is a developer's pattern of activity in this selection, split at the medians. "
+                            "This chart is not a performance evaluation: design, incidents, reviews and helping others "
+                            "often leave few lines behind."
+                        }
+                        @if !insufficient.is_empty() {
+                            p.note { "Not plotted, insufficient data (fewer than " (settings.min_lines) " changed lines): " (insufficient.join(", ")) }
+                        }
                     }
                     div.scroll { table {
                         thead { tr {
-                            th { "Developer" } th.num { "Active days" } th.num { "Commits per active day" }
+                            th { "Developer" } th { "Work mix" } th.num { "Active days" } th.num { "Commits per active day" }
                             th.num { "New work" } th.num { "Legacy refactor" } th.num { "Helping others" }
                             th.num { "Churn" } th.num { "Efficiency" } th.num { "Impact" }
                         } }
                         tbody {
                             @for r in &rows {
-                                tr {
+                                tr.dim[r.impact.is_none()] {
                                     td { a href=(ctx.filters.link("/developer", &[("id", &r.developer_id)])) { (r.name) } }
+                                    td { (charts::stack(&work_segments(&r.work))) }
                                     td.num { (metric(link(&r.developer_id, "commits"), r.active_days.to_string())) }
                                     td.num { (metric(link(&r.developer_id, "commits"), format!("{:.1}", r.commits_per_active_day))) }
-                                    td.num { (metric(link(&r.developer_id, "new_work"), r.work.new_work.to_string())) }
-                                    td.num { (metric(link(&r.developer_id, "legacy_refactor"), r.work.legacy_refactor.to_string())) }
-                                    td.num { (metric(link(&r.developer_id, "help_others"), r.work.help_others.to_string())) }
-                                    td.num { (metric(link(&r.developer_id, "churn"), r.work.churn.to_string())) }
-                                    td.num { (metric(link(&r.developer_id, "churn"), r.efficiency.map_or("insufficient data".into(), pct))) }
-                                    td.num { (metric(link(&r.developer_id, "impact"), r.impact.map_or("insufficient data".into(), |v| format!("{v:.2}")))) }
+                                    td.num { (metric(link(&r.developer_id, "new_work"), num(r.work.new_work))) }
+                                    td.num { (metric(link(&r.developer_id, "legacy_refactor"), num(r.work.legacy_refactor))) }
+                                    td.num { (metric(link(&r.developer_id, "help_others"), num(r.work.help_others))) }
+                                    td.num { (metric(link(&r.developer_id, "churn"), num(r.work.churn))) }
+                                    td.num { (metric(link(&r.developer_id, "churn"), r.efficiency.map_or("–".into(), pct))) }
+                                    td.num { (metric(link(&r.developer_id, "impact"), r.impact.map_or("–".into(), |v| format!("{v:.2}")))) }
                                 }
                             }
                         }
@@ -186,13 +293,7 @@ pub async fn evidence(
     {
         Err(e) => error(e),
         Ok(commits) => {
-            let total = commits.iter().fold(WorkTypes::default(), |mut t, c| {
-                t.new_work += c.work.new_work;
-                t.legacy_refactor += c.work.legacy_refactor;
-                t.help_others += c.work.help_others;
-                t.churn += c.work.churn;
-                t
-            });
+            let total = sum_work(commits.iter().map(|c| &c.work));
             let github: HashMap<i64, String> = store
                 .repositories()
                 .unwrap_or_default()
@@ -202,28 +303,33 @@ pub async fn evidence(
             html! {
                 p { "Commits by " strong { (name_of(&names, &id)) } " in this selection"
                     @if let Some(m) = &extra.metric { " (showing evidence for " (m.replace('_', " ")) ")" } "." }
-                table {
+                div.card { (work_mix(&total)) }
+                div.scroll { table {
                     thead { tr { th { "Day" } th { "Commit" } th.num { "New work" } th.num { "Legacy refactor" }
                                  th.num { "Helping others" } th.num { "Churn" } th { "Rewrote lines from" } } }
                     tbody {
                         @for c in &commits {
                             tr {
-                                td { (c.day) }
-                                td {
+                                td.nowrap { (c.day) }
+                                td.wide {
                                     @if let Some(g) = github.get(&c.repository_id) {
                                         a href=(format!("https://github.com/{g}/commit/{}", c.sha)) { code { (&c.sha[..10]) } }
                                     } @else { code { (&c.sha[..10]) } }
                                     " " (c.subject)
                                 }
-                                td.num { (c.work.new_work) } td.num { (c.work.legacy_refactor) }
-                                td.num { (c.work.help_others) } td.num { (c.work.churn) }
-                                td {
+                                td.num { (num(c.work.new_work)) } td.num { (num(c.work.legacy_refactor)) }
+                                td.num { (num(c.work.help_others)) } td.num { (num(c.work.churn)) }
+                                td.rewrote {
                                     @for r in &c.rewrote {
+                                        @let (kind, class) = match r.work_type {
+                                            WorkType::NewWork => ("new work", WORK[0].1),
+                                            WorkType::LegacyRefactor => ("legacy refactor", WORK[1].1),
+                                            WorkType::HelpOthers => ("helping others", WORK[2].1),
+                                            WorkType::Churn => ("churn", WORK[3].1),
+                                        };
                                         div {
-                                            (r.lines) " lines, "
-                                            (match r.work_type { WorkType::Churn => "churn", WorkType::HelpOthers => "helping others",
-                                                                 WorkType::LegacyRefactor => "legacy refactor", WorkType::NewWork => "new work" })
-                                            ", from "
+                                            i.dot class=(class) {}
+                                            (r.lines) " lines · " (kind) " · from "
                                             @match (&r.introduced_sha, &r.introduced_by) {
                                                 (Some(sha), Some(by)) => { code { (&sha[..10]) } " by " (name_of(&names, by)) }
                                                 (Some(sha), None) => { code { (&sha[..10]) } " (excluded identity)" }
@@ -234,10 +340,10 @@ pub async fn evidence(
                                 }
                             }
                         }
-                        tr { th { "Total" } th {} th.num { (total.new_work) } th.num { (total.legacy_refactor) }
-                             th.num { (total.help_others) } th.num { (total.churn) } th {} }
+                        tr.total { th { "Total" } th {} th.num { (num(total.new_work)) } th.num { (num(total.legacy_refactor)) }
+                             th.num { (num(total.help_others)) } th.num { (num(total.churn)) } th {} }
                     }
-                }
+                } }
             }
         }
     };
@@ -270,19 +376,35 @@ pub async fn developer(
     let reviews = store.review_summary(&ctx.selection).unwrap_or_default();
     let as_author = reviews.authors.iter().find(|a| a.developer_id == id);
     let as_reviewer = reviews.reviewers.iter().find(|r| r.developer_id == id);
+    let bars: Vec<(String, [u64; 4])> = weeks
+        .iter()
+        .map(|(week, w)| (week.strftime("%b %d").to_string(), work_values(w)))
+        .collect();
     let body = html! {
         h2 { (name_of(&names, &id)) }
         @if let Some(r) = &fundamentals {
-            table { tbody {
-                tr { th { "Active days" } td.num { (metric(link("commits"), r.active_days.to_string())) } }
-                tr { th { "Commits" } td.num { (metric(link("commits"), r.commits.to_string())) } }
-                tr { th { "Efficiency" } td.num { (metric(link("churn"), r.efficiency.map_or("insufficient data".into(), pct))) } }
-                tr { th { "Impact" } td.num { (metric(link("impact"), r.impact.map_or("insufficient data".into(), |v| format!("{v:.2}")))) } }
-            } }
+            div.tiles {
+                (tile("Active days", metric(link("commits"), r.active_days.to_string())))
+                (tile("Commits", metric(link("commits"), num(r.commits))))
+                (tile("Changed lines", metric(link("commits"), num(r.work.changed()))))
+                (tile("Efficiency", metric(link("churn"), r.efficiency.map_or("–".into(), pct))))
+                (tile("Impact", metric(link("impact"), r.impact.map_or("–".into(), |v| format!("{v:.2}")))))
+            }
+            div.card {
+                h2 { "Work mix" }
+                (work_mix(&r.work))
+            }
         } @else {
             p { "No commits in this period." }
         }
-        h3 { "Work types per week" }
+        @if !weeks.is_empty() {
+            div.card {
+                h2 { "Changed lines per week" }
+                (charts::stacked_bars(&bars))
+                (charts::legend(&WORK))
+            }
+        }
+        h2 { "Work types per week" }
         table {
             thead { tr { th { "Week of" } th.num { "New work" } th.num { "Legacy refactor" } th.num { "Helping others" } th.num { "Churn" } } }
             tbody {
@@ -290,29 +412,30 @@ pub async fn developer(
                     tr {
                         td { (week.to_string()) }
                         @for (value, m) in [(w.new_work, "new_work"), (w.legacy_refactor, "legacy_refactor"), (w.help_others, "help_others"), (w.churn, "churn")] {
-                            td.num { (metric(link(m), value.to_string())) }
+                            td.num { (metric(link(m), num(value))) }
                         }
                     }
                 }
             }
         }
-        h3 { "Pull requests" }
+        h2 { "Pull requests" }
         @if let Some(a) = as_author {
             @let prs = ctx.filters.link("/reviews/prs", &[("author", &id)]);
-            table { tbody {
-                tr { th { "Merged" } td.num { (metric(prs.clone(), a.merged.to_string())) } }
-                tr { th { "Cycle time" } td.num { (metric(prs.clone(), agg(a.cycle))) } }
-                tr { th { "Pickup" } td.num { (metric(prs.clone(), agg(a.pickup))) } }
-                tr { th { "Responsiveness" } td.num { (metric(prs.clone(), agg(a.responsiveness))) } }
-                tr { th { "Unreviewed" } td.num { (metric(prs, a.unreviewed.to_string())) } }
-            } }
+            div.tiles {
+                (tile("Merged", metric(prs.clone(), a.merged.to_string())))
+                (tile("Cycle time", metric_agg(prs.clone(), a.cycle)))
+                (tile("Pickup", metric_agg(prs.clone(), a.pickup)))
+                (tile("Responsiveness", metric_agg(prs.clone(), a.responsiveness)))
+                (tile("Unreviewed", metric(prs, a.unreviewed.to_string())))
+            }
         } @else { p { "No pull requests merged or closed in this period." } }
         @if let Some(r) = as_reviewer {
             @let prs = ctx.filters.link("/reviews/prs", &[("reviewer", &id)]);
-            table { tbody {
-                tr { th { "PRs reviewed" } td.num { (metric(prs.clone(), r.pull_requests_reviewed.to_string())) } }
-                tr { th { "Reaction time" } td.num { (metric(prs, agg(r.reaction))) } }
-            } }
+            h2 { "Reviews given" }
+            div.tiles {
+                (tile("PRs reviewed", metric(prs.clone(), r.pull_requests_reviewed.to_string())))
+                (tile("Reaction time", metric_agg(prs, r.reaction)))
+            }
         }
     };
     ctx.page(
@@ -357,7 +480,8 @@ pub async fn work_log(State(state): S, Query(filters): Query<Filters>) -> Markup
                 let mut developers: Vec<&String> = grid.keys().collect();
                 developers.sort_by_key(|id| (name_of(&names, id).to_lowercase(), (*id).clone()));
                 html! {
-                    p.note { "C commits · O pull requests opened · M merged · R reviews · K comments. Empty days carry no meaning." }
+                    (charts::legend(&[("C commits", "s1"), ("O pull requests opened", "s2"), ("M merged", "s3"), ("R reviews", "s4"), ("K comments", "s5")]))
+                    p.note { "Empty days carry no meaning." }
                     div.scroll { table.grid {
                         thead { tr {
                             th { "Developer" }
@@ -375,9 +499,11 @@ pub async fn work_log(State(state): S, Query(filters): Query<Filters>) -> Markup
                                         @match grid[*id].get(&key) {
                                             Some(a) if !a.is_empty() => {
                                                 td.weekend[weekend] {
-                                                    @let parts: Vec<String> = [("C", a.commits), ("O", a.prs_opened), ("M", a.prs_merged), ("R", a.reviews), ("K", a.comments)]
-                                                        .iter().filter(|(_, n)| *n > 0).map(|(l, n)| format!("{l}{n}")).collect();
-                                                    (metric(ctx.filters.link("/work-log/day", &[("id", id), ("day", &key)]), parts.join(" ")))
+                                                    a.chips href=(ctx.filters.link("/work-log/day", &[("id", id), ("day", &key)])) {
+                                                        @for (letter, class, n) in [("C", "s1", a.commits), ("O", "s2", a.prs_opened), ("M", "s3", a.prs_merged), ("R", "s4", a.reviews), ("K", "s5", a.comments)] {
+                                                            @if n > 0 { span.chip { i class=(class) {} (letter) (n) } }
+                                                        }
+                                                    }
                                                 }
                                             }
                                             _ => { td.weekend[weekend] {} }
@@ -494,11 +620,23 @@ pub async fn reviews(State(state): S, Query(filters): Query<Filters>) -> Markup 
                 .collect();
             reviewers.sort_by_key(|id| name_of(&names, id).to_lowercase());
             authors.sort_by_key(|id| name_of(&names, id).to_lowercase());
+            let peak = matrix.values().copied().max().unwrap_or(1).max(1);
+            let (prs, merged, unreviewed) = summary.authors.iter().fold((0, 0, 0), |t, a| {
+                (t.0 + a.pull_requests, t.1 + a.merged, t.2 + a.unreviewed)
+            });
             html! {
-                p.note { "Pull requests merged or closed in the period. Times are calendar hours: median · 75th percentile · number of PRs." }
+                div.tiles {
+                    (tile("Pull requests", html! { (num(prs)) }))
+                    (tile("Merged", html! { (num(merged)) }))
+                    (tile("Merged unreviewed", html! { (num(unreviewed)) }))
+                    (tile("Authors", html! { (summary.authors.len()) }))
+                    (tile("Reviewers", html! { (summary.reviewers.len()) }))
+                }
+                p.note { "Pull requests merged or closed in the period. Times are calendar time: the median on top, then the 75th percentile and the number of PRs." }
                 h2 { "Authors" }
+                (charts::legend(&STAGES))
                 div.scroll { table {
-                    thead { tr { th { "Author" } th.num { "PRs" } th.num { "Merged" } th.num { "Unreviewed" } th.num { "Cycle time" }
+                    thead { tr { th { "Author" } th.num { "PRs" } th.num { "Merged" } th.num { "Unreviewed" } th { "Stages (median)" } th.num { "Cycle time" }
                                  th.num { "Coding" } th.num { "Pickup" } th.num { "Review" } th.num { "Responsiveness" } th.num { "Iterations" } } }
                     tbody {
                         @for a in &summary.authors {
@@ -508,11 +646,12 @@ pub async fn reviews(State(state): S, Query(filters): Query<Filters>) -> Markup 
                                 td.num { (metric(l.clone(), a.pull_requests.to_string())) }
                                 td.num { (metric(l.clone(), a.merged.to_string())) }
                                 td.num { (metric(l.clone(), match a.unreviewed_share() { Some(s) => format!("{} ({})", a.unreviewed, pct(s)), None => a.unreviewed.to_string() })) }
-                                td.num { (metric(l.clone(), agg(a.cycle))) }
-                                td.num { (metric(l.clone(), agg(a.coding))) }
-                                td.num { (metric(l.clone(), agg(a.pickup))) }
-                                td.num { (metric(l.clone(), agg(a.review))) }
-                                td.num { (metric(l.clone(), agg(a.responsiveness))) }
+                                td { (charts::stack(&stage_segments([a.coding, a.pickup, a.review]))) }
+                                td.num { (metric_agg(l.clone(), a.cycle)) }
+                                td.num { (metric_agg(l.clone(), a.coding)) }
+                                td.num { (metric_agg(l.clone(), a.pickup)) }
+                                td.num { (metric_agg(l.clone(), a.review)) }
+                                td.num { (metric_agg(l.clone(), a.responsiveness)) }
                                 td.num { (metric(l, a.iterations.to_string())) }
                             }
                         }
@@ -527,22 +666,23 @@ pub async fn reviews(State(state): S, Query(filters): Query<Filters>) -> Markup 
                             tr {
                                 td { (r.name) }
                                 td.num { (metric(l.clone(), r.pull_requests_reviewed.to_string())) }
-                                td.num { (metric(l, agg(r.reaction))) }
+                                td.num { (metric_agg(l, r.reaction)) }
                             }
                         }
                     }
                 }
                 h2 { "Who reviews whom" }
                 p.note { "Rows are reviewers, columns are authors; each cell counts the PRs reviewed." }
-                div.scroll { table.grid {
-                    thead { tr { th {} @for author in &authors { th { (name_of(&names, author)) } } } }
+                div.scroll { table.grid.matrix {
+                    thead { tr { th {} @for author in &authors { th.col { (name_of(&names, author)) } } } }
                     tbody {
                         @for reviewer in &reviewers {
                             tr {
                                 th { (name_of(&names, reviewer)) }
                                 @for author in &authors {
-                                    td.num {
-                                        @if let Some(n) = matrix.get(&(*reviewer, *author)) {
+                                    @let n = matrix.get(&(*reviewer, *author));
+                                    td.num style=[n.map(|n| format!("background: color-mix(in srgb, var(--s1) {}%, transparent)", 8 + n * 52 / peak))] {
+                                        @if let Some(n) = n {
                                             (metric(ctx.filters.link("/reviews/prs", &[("reviewer", reviewer), ("author", author)]), n.to_string()))
                                         }
                                     }
@@ -642,7 +782,7 @@ pub async fn pr_detail(
                 tr { th { "Iterations" } td.num { (pr.timings.iterations) } }
                 tr { th { "Unreviewed" } td { (if pr.timings.is_unreviewed { "yes" } else { "no" }) } }
             } }
-            h3 { "Events used" }
+            h2 { "Events used" }
             table {
                 thead { tr { th { "Time" } th { "Event" } th { "By" } th { "Detail" } } }
                 tbody {
