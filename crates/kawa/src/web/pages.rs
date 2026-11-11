@@ -230,6 +230,13 @@ pub async fn overview(State(state): S, Query(filters): Query<Filters>) -> Markup
                             "Este gráfico no es una evaluación de desempeño: el diseño, los incidentes, las revisiones y la ayuda a otros "
                             "suelen dejar pocas líneas."
                         }
+                        @let floor = charts::efficiency_floor(&points);
+                        @if floor > 0.0 {
+                            p.note {
+                                "El eje vertical empieza en " (pct(floor)) ", no en 0%: las distancias verticales se ven ampliadas y "
+                                "uno o dos puntos de diferencia no distinguen a dos personas."
+                            }
+                        }
                         @if !insufficient.is_empty() {
                             p.note { "Sin graficar por datos insuficientes (menos de " (settings.min_lines) " líneas cambiadas): " (insufficient.join(", ")) }
                         }

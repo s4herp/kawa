@@ -60,9 +60,9 @@ struct Label {
 
 /// Lowest efficiency shown, rounded down to a 5% step so the lowest point
 /// keeps some room below it.
-fn y_floor(points: &[Point]) -> f64 {
+pub fn efficiency_floor(points: &[Point]) -> f64 {
     let min = points.iter().map(|p| p.y).fold(1.0_f64, f64::min);
-    ((min - 0.02) * 20.0).floor() / 20.0
+    (((min - 0.02) * 20.0).floor() / 20.0).clamp(0.0, 0.9)
 }
 
 fn y_ticks(floor: f64) -> Vec<f64> {
@@ -155,7 +155,7 @@ fn place_labels(
 /// Impact (x) against efficiency (y), split at the medians of the plotted
 /// points. Labels describe patterns, not ratings.
 pub fn quadrant(points: &[Point]) -> Markup {
-    let y_min = y_floor(points).clamp(0.0, 0.9);
+    let y_min = efficiency_floor(points);
     let (x0, x1, y0, y1) = (LEFT, WIDTH - RIGHT, TOP, HEIGHT - BOTTOM);
     let x_of = |x: f64| x0 + x * (x1 - x0);
     let y_of = |y: f64| y1 - (y - y_min) / (1.0 - y_min).max(f64::EPSILON) * (y1 - y0);
