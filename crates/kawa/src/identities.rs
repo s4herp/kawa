@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use kawa_core::identity::{
     DeveloperId, DeveloperSpec, DisplayNames, IdentityError, IdentityRules, LoginEvidence,
-    Resolution, link_logins,
+    LoginMerges, Resolution, link_logins,
 };
 use kawa_core::repo;
 use kawa_store::{AuditRow, IdentityResolution, Store, StoreError};
@@ -68,17 +68,24 @@ pub fn resolve(
 ) -> Result<(), IdentitiesError> {
     store.register_pr_logins()?;
     let evidence = store.login_evidence()?;
-    let links = link_logins(
-        rules,
+    let items = || {
         evidence.iter().map(|e| LoginEvidence {
             login: &e.login,
             name: &e.name,
             email: &e.email,
             commits: e.commits,
-        }),
-    );
+        })
+    };
+    let links = link_logins(rules, items());
+    let merges = LoginMerges::new(rules, items(), &links);
 
     let mut names = DisplayNames::new(developers);
+    // PR commits name people who only review or open PRs in the selection.
+    for e in &evidence {
+        if let Resolution::Developer { id, name } = rules.resolve_author(&e.name, &e.email) {
+            names.observe(&merges.target(rules, id), &name, e.commits);
+        }
+    }
     let mut resolutions = Vec::new();
     let mut ids: BTreeSet<DeveloperId> = BTreeSet::new();
     for identity in store.identities()? {
@@ -89,6 +96,7 @@ pub fn resolve(
         };
         match resolution {
             Resolution::Developer { id, name } => {
+                let id = merges.target(rules, id);
                 if identity.login.is_empty() {
                     names.observe(&id, &name, identity.commits);
                 }

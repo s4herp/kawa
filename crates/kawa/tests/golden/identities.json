@@ -4,7 +4,7 @@
       "identity": "Ana P <ana@new.example>",
       "status": "developer",
       "developer_id": "ana@new.example",
-      "developer": "Ana",
+      "developer": "Ana P",
       "commits": 1,
       "pull_requests": 0,
       "reviews": 0
@@ -13,7 +13,7 @@
       "identity": "Ana <ana@old.example>",
       "status": "developer",
       "developer_id": "ana@new.example",
-      "developer": "Ana",
+      "developer": "Ana P",
       "commits": 2,
       "pull_requests": 0,
       "reviews": 0
@@ -22,7 +22,7 @@
       "identity": "@ana-gh",
       "status": "developer",
       "developer_id": "ana@new.example",
-      "developer": "Ana",
+      "developer": "Ana P",
       "commits": 0,
       "pull_requests": 1,
       "reviews": 0

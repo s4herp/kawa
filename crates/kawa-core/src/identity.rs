@@ -158,8 +158,21 @@ pub struct LoginEvidence<'a> {
     pub commits: u64,
 }
 
-/// Links each login to the developer that most of its PR commits resolve to.
-/// Ties go to the smallest developer id so results are deterministic.
+/// The login a GitHub noreply address stands for: `<id>+<login>@` or
+/// `<login>@users.noreply.github.com`.
+pub fn noreply_login(email: &str) -> Option<String> {
+    let local = email
+        .trim()
+        .to_lowercase()
+        .strip_suffix("@users.noreply.github.com")?
+        .to_owned();
+    let login = local.split_once('+').map_or(local.as_str(), |(_, l)| l);
+    (!login.is_empty()).then(|| login.to_owned())
+}
+
+/// Links each login to the developer that most of its PR commits resolve to,
+/// preferring a real address over a noreply one. Ties go to the smallest
+/// developer id so results are deterministic.
 pub fn link_logins<'a>(
     rules: &IdentityRules,
     evidence: impl IntoIterator<Item = LoginEvidence<'a>>,
@@ -179,14 +192,82 @@ pub fn link_logins<'a>(
         .filter_map(|(login, counts)| {
             counts
                 .into_iter()
-                .max_by(|(a_id, a), (b_id, b)| a.cmp(b).then_with(|| b_id.cmp(a_id)))
+                .max_by(|(a_id, a), (b_id, b)| {
+                    let real = |id: &DeveloperId| noreply_login(id.as_str()).is_none();
+                    real(a_id)
+                        .cmp(&real(b_id))
+                        .then(a.cmp(b))
+                        .then_with(|| b_id.cmp(a_id))
+                })
                 .map(|(id, _)| (login, id))
         })
         .collect()
 }
 
+/// Other addresses of the same person, keyed by the developer they would
+/// otherwise be: an email goes to the linked developer of the login it
+/// authored most PR commits with, and a noreply address to the login it
+/// names. Developers declared in config are never folded into others.
+#[derive(Debug, Default)]
+pub struct LoginMerges {
+    by_email: HashMap<DeveloperId, DeveloperId>,
+    links: BTreeMap<String, DeveloperId>,
+}
+
+impl LoginMerges {
+    pub fn new<'a>(
+        rules: &IdentityRules,
+        evidence: impl IntoIterator<Item = LoginEvidence<'a>>,
+        links: &BTreeMap<String, DeveloperId>,
+    ) -> Self {
+        let mut votes: BTreeMap<DeveloperId, BTreeMap<String, u64>> = BTreeMap::new();
+        for item in evidence {
+            if let Resolution::Developer { id, .. } = rules.resolve_author(item.name, item.email) {
+                *votes
+                    .entry(id)
+                    .or_default()
+                    .entry(item.login.trim().to_lowercase())
+                    .or_default() += item.commits;
+            }
+        }
+        let by_email = votes
+            .into_iter()
+            .filter(|(id, _)| !rules.aliases.contains_key(id.as_str()))
+            .filter_map(|(id, counts)| {
+                let (login, _) = counts.into_iter().max_by(|(a_login, a), (b_login, b)| {
+                    a.cmp(b).then_with(|| b_login.cmp(a_login))
+                })?;
+                let target = links.get(&login)?;
+                (*target != id).then(|| (id, target.clone()))
+            })
+            .collect();
+        Self {
+            by_email,
+            links: links.clone(),
+        }
+    }
+
+    /// The developer `id` folds into, or `id` itself.
+    pub fn target(&self, rules: &IdentityRules, id: DeveloperId) -> DeveloperId {
+        if rules.aliases.contains_key(id.as_str()) {
+            return id;
+        }
+        if let Some(target) = self.by_email.get(&id) {
+            return target.clone();
+        }
+        match noreply_login(id.as_str()) {
+            Some(login) => match rules.logins.get(&login).or(self.links.get(&login)) {
+                Some(target) => target.clone(),
+                None => DeveloperId::from_login(&login),
+            },
+            None => id,
+        }
+    }
+}
+
 /// Picks a display name per developer: the config name if given, otherwise
-/// the most frequent name seen, ties broken by the name that sorts first.
+/// the most frequent name seen, preferring full names ("Ana Pérez") over
+/// handles ("aperez"), ties broken by the name that sorts first.
 #[derive(Debug, Default)]
 pub struct DisplayNames {
     fixed: HashMap<DeveloperId, String>,
@@ -227,7 +308,13 @@ impl DisplayNames {
             .and_then(|names| {
                 names
                     .iter()
-                    .max_by(|(a_name, a), (b_name, b)| a.cmp(b).then_with(|| b_name.cmp(a_name)))
+                    .max_by(|(a_name, a), (b_name, b)| {
+                        let full = |name: &str| name.trim().contains(' ');
+                        full(a_name)
+                            .cmp(&full(b_name))
+                            .then(a.cmp(b))
+                            .then_with(|| b_name.cmp(a_name))
+                    })
                     .map(|(name, _)| name.clone())
             })
             .unwrap_or_else(|| id.as_str().trim_start_matches("gh:").to_owned())
@@ -237,6 +324,19 @@ impl DisplayNames {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_name_prefers_full_names_over_handles() {
+        let mut names = DisplayNames::new(&[]);
+        let id = DeveloperId::from_email("ana@work.example");
+        names.observe(&id, "aperez", 900);
+        names.observe(&id, "Ana Pérez", 3);
+        assert_eq!(
+            names.name(&id),
+            "Ana Pérez",
+            "should show the full name even when the handle is more frequent"
+        );
+    }
 
     const BOT: &str = r"(?i)\[bot\]$";
 
