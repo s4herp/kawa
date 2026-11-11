@@ -1,6 +1,7 @@
 //! Local web dashboard, served by `kawa serve`.
 
 mod charts;
+mod es;
 mod layout;
 mod pages;
 
@@ -176,14 +177,14 @@ fn stale_repositories(
         if let Some(error) = &status.error {
             stale.push((
                 repository.path.clone(),
-                format!("last sync failed at {}: {}", error.at, error.message),
+                format!("el último sync falló el {}: {}", error.at, error.message),
             ));
             continue;
         }
         match status.git_synced_at {
             Some(at) if now.duration_since(at) <= STALE_AFTER => {}
-            Some(at) => stale.push((repository.path.clone(), format!("last synced at {at}"))),
-            None => stale.push((repository.path.clone(), "never synced".to_owned())),
+            Some(at) => stale.push((repository.path.clone(), format!("último sync: {at}"))),
+            None => stale.push((repository.path.clone(), "nunca sincronizado".to_owned())),
         }
     }
     stale

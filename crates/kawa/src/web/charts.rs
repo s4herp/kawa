@@ -2,6 +2,8 @@
 
 use maud::{Markup, html};
 
+use super::es::dec;
+
 pub struct Point {
     pub label: String,
     pub link: String,
@@ -161,10 +163,10 @@ pub fn quadrant(points: &[Point]) -> Markup {
     let my = y_of(median(&mut points.iter().map(|p| p.y).collect::<Vec<_>>()));
 
     let corners = [
-        ("Focused changes, little churn", false, true),
-        ("Broad changes, little churn", true, true),
-        ("Focused changes, more churn", false, false),
-        ("Broad changes, more churn", true, false),
+        ("Cambios acotados, poco churn", false, true),
+        ("Cambios amplios, poco churn", true, true),
+        ("Cambios acotados, más churn", false, false),
+        ("Cambios amplios, más churn", true, false),
     ];
     let reserved: Vec<Rect> = corners
         .iter()
@@ -199,7 +201,7 @@ pub fn quadrant(points: &[Point]) -> Markup {
 
     html! {
         svg.quadrant-chart viewBox=(format!("0 0 {WIDTH} {HEIGHT}")) role="img"
-            aria-label="Impact against efficiency per developer" {
+            aria-label="Impacto frente a eficiencia por persona" {
             rect.plot x=(x0) y=(y0) width=(x1 - x0) height=(y1 - y0) {}
             rect.zone x=(x0) y=(y0) width=(mx - x0) height=(my - y0) {}
             rect.zone x=(mx) y=(my) width=(x1 - mx) height=(y1 - my) {}
@@ -209,20 +211,20 @@ pub fn quadrant(points: &[Point]) -> Markup {
             }
             @for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
                 line.grid x1=(x_of(t)) y1=(y0) x2=(x_of(t)) y2=(y1) {}
-                text.tick x=(x_of(t)) y=(y1 + 16.0) text-anchor="middle" { (format!("{t:.2}")) }
+                text.tick x=(x_of(t)) y=(y1 + 16.0) text-anchor="middle" { (dec(t, 2)) }
             }
             line.median x1=(mx) y1=(y0) x2=(mx) y2=(y1) {}
             line.median x1=(x0) y1=(my) x2=(x1) y2=(my) {}
             @for (i, (text, _, _)) in corners.iter().enumerate() {
                 text.corner x=(reserved[i].x0) y=(reserved[i].y1 - 3.0) { (text) }
             }
-            text.axis-title x=((x0 + x1) / 2.0) y=(HEIGHT - 10.0) text-anchor="middle" { "Impact (relative to the selection)" }
+            text.axis-title x=((x0 + x1) / 2.0) y=(HEIGHT - 10.0) text-anchor="middle" { "Impacto (relativo a la selección)" }
             text.axis-title x="14" y=((y0 + y1) / 2.0) transform=(format!("rotate(-90 14 {})", (y0 + y1) / 2.0)) text-anchor="middle" {
-                "Efficiency"
+                "Eficiencia"
             }
             @for (point, label) in points.iter().zip(&labels) {
                 a.dot href=(point.link) {
-                    title { (format!("{}: impact {:.2}, efficiency {:.0}%", point.label, point.x, point.y * 100.0)) }
+                    title { (format!("{}: impacto {}, eficiencia {:.0}%", point.label, dec(point.x, 2), point.y * 100.0)) }
                     circle cx=(x_of(point.x)) cy=(y_of(point.y)) r=(RADIUS) {}
                     @match label {
                         Some(l) => text.label x=(l.x) y=(l.y) text-anchor=(l.anchor) { (point.label) },
@@ -236,14 +238,14 @@ pub fn quadrant(points: &[Point]) -> Markup {
 
 /// Work types and their colour slots, in the fixed order used on every page.
 pub const WORK: [(&str, &str); 4] = [
-    ("New work", "s1"),
-    ("Legacy refactor", "s2"),
-    ("Helping others", "s3"),
+    ("Trabajo nuevo", "s1"),
+    ("Refactor de legacy", "s2"),
+    ("Ayuda a otros", "s3"),
     ("Churn", "s4"),
 ];
 
 /// Pull request stages and their colour slots.
-pub const STAGES: [(&str, &str); 3] = [("Coding", "s1"), ("Pickup", "s2"), ("Review", "s3")];
+pub const STAGES: [(&str, &str); 3] = [("Desarrollo", "s1"), ("Espera", "s2"), ("Revisión", "s3")];
 
 pub struct Segment {
     pub label: &'static str,
@@ -286,9 +288,9 @@ pub fn legend(items: &[(&str, &str)]) -> Markup {
 /// Axis value in short form: 1500 as "1.5k".
 fn compact(value: f64) -> String {
     if value >= 1_000_000.0 {
-        format!("{}M", (value / 100_000.0).round() / 10.0)
+        format!("{}M", (value / 100_000.0).round() / 10.0).replace('.', ",")
     } else if value >= 1000.0 {
-        format!("{}k", (value / 100.0).round() / 10.0)
+        format!("{}k", (value / 100.0).round() / 10.0).replace('.', ",")
     } else {
         format!("{value:.0}")
     }
@@ -335,13 +337,13 @@ pub fn stacked_bars(periods: &[(String, [u64; 4])]) -> Markup {
                 x_of(i),
                 y0,
                 (y1 - y0 - 2.0).max(1.0),
-                format!("{label} · {}: {value} lines", WORK[j].0),
+                format!("{label} · {}: {value} líneas", WORK[j].0),
             ));
             below += v;
         }
     }
     html! {
-        svg.bars viewBox=(format!("0 0 {W} {H}")) role="img" aria-label="Changed lines per week by work type" {
+        svg.bars viewBox=(format!("0 0 {W} {H}")) role="img" aria-label="Líneas cambiadas por semana según tipo de trabajo" {
             @for t in [0.0, 0.5, 1.0] {
                 line.grid x1=(L) y1=(y_of(top * t)) x2=(W - 8.0) y2=(y_of(top * t)) {}
                 text.tick x=(L - 8.0) y=(y_of(top * t) + 4.0) text-anchor="end" { (compact(top * t)) }

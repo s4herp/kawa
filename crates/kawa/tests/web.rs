@@ -215,15 +215,15 @@ async fn overview_shows_quadrant_without_ranking() {
     let (_, body) = get(&app, "/?period=30").await;
     assert!(body.contains("<svg"), "should draw the quadrant");
     assert!(
-        body.contains("Broad changes, little churn"),
+        body.contains("Cambios amplios, poco churn"),
         "should label quadrants as patterns"
     );
     assert!(
-        body.contains("not a performance evaluation"),
+        body.contains("no es una evaluación de desempeño"),
         "should state the chart is not an evaluation"
     );
     assert!(
-        body.contains("insufficient data") && body.contains("Carla"),
+        body.contains("datos insuficientes") && body.contains("Carla"),
         "should list Carla below the chart"
     );
     let (ana, carla, luis) = (
@@ -246,14 +246,17 @@ async fn developer_profile_shows_weeks_and_pull_requests() {
     let (app, _keep) = build_app(world(1), NOW);
     let (_, body) = get(&app, "/developer?id=ana%40example.com").await;
     assert!(
-        body.contains("Work types per week"),
+        body.contains("Tipos de trabajo por semana"),
         "should show the weekly trend"
     );
     assert!(
-        body.contains("Week of") && body.contains("2026-11-02"),
+        body.contains("Semana del") && body.contains("2026-11-02"),
         "should start weeks on Monday"
     );
-    assert!(body.contains("Cycle time"), "should show Ana's PR metrics");
+    assert!(
+        body.contains("Tiempo de ciclo"),
+        "should show Ana's PR metrics"
+    );
 }
 
 #[tokio::test]
@@ -284,7 +287,7 @@ async fn work_log_grid_and_cells() {
         "should have one row per developer with activity"
     );
     assert!(
-        rows.contains("</i>C1</span><span class=\"chip\"><i class=\"s2\"></i>O1</span>"),
+        rows.contains("</i>C1</span><span class=\"chip\"><i class=\"s2\"></i>A1</span>"),
         "should count Ana's commit and opened PR on the same day"
     );
 
@@ -314,7 +317,7 @@ async fn work_log_grid_and_cells() {
     )
     .await;
     assert!(
-        long.contains("Choose a shorter period"),
+        long.contains("Elige un período más corto"),
         "should ask for a shorter period"
     );
     assert!(
@@ -328,7 +331,7 @@ async fn review_view_matrix_and_pr_timeline() {
     let (app, _keep) = build_app(world(1), NOW);
     let (_, body) = get(&app, "/reviews").await;
     assert!(
-        body.contains("Who reviews whom"),
+        body.contains("Quién revisa a quién"),
         "should show the reviewer-author matrix"
     );
     assert!(
@@ -346,13 +349,16 @@ async fn review_view_matrix_and_pr_timeline() {
     );
 
     let (_, detail) = get(&app, "/pr?repository=1&number=1").await;
-    assert!(detail.contains("Events used"), "should show the timeline");
     assert!(
-        detail.contains("review") && detail.contains("luis"),
+        detail.contains("Eventos usados"),
+        "should show the timeline"
+    );
+    assert!(
+        detail.contains("revisión") && detail.contains("luis"),
         "should list the review with its actor"
     );
     assert!(
-        detail.contains("Pickup"),
+        detail.contains("Espera"),
         "should show the computed timings"
     );
 }
@@ -373,7 +379,7 @@ async fn identities_and_sync_views() {
         "should show the last sync"
     );
     assert!(
-        !sync.contains("Data may be out of date"),
+        !sync.contains("Los datos pueden estar desactualizados"),
         "should not warn about fresh data"
     );
 }
@@ -383,11 +389,11 @@ async fn stale_and_failed_syncs_are_flagged() {
     let (app, _keep) = build_app(world(1), "2026-11-13T12:00:00Z");
     let (_, body) = get(&app, "/").await;
     assert!(
-        body.contains("Data may be out of date"),
+        body.contains("Los datos pueden estar desactualizados"),
         "should warn when the last sync is 3 days old"
     );
     assert!(
-        body.contains("last synced at 2026-11-10"),
+        body.contains("último sync: 2026-11-10"),
         "should name the sync time"
     );
 
@@ -403,7 +409,7 @@ async fn stale_and_failed_syncs_are_flagged() {
     let (app, _keep) = build_app(w, NOW);
     let (_, body) = get(&app, "/reviews").await;
     assert!(
-        body.contains("last sync failed") && body.contains("rate limited"),
+        body.contains("el último sync falló") && body.contains("rate limited"),
         "should flag the failed sync"
     );
 }

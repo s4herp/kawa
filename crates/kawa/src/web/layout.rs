@@ -139,11 +139,11 @@ pub struct Page<'a> {
 }
 
 const NAV: &[(&str, &str)] = &[
-    ("/", "Fundamentals"),
-    ("/work-log", "Work log"),
-    ("/reviews", "Reviews"),
-    ("/identities", "Identities"),
-    ("/sync", "Sync"),
+    ("/", "Fundamentos"),
+    ("/work-log", "Bitácora"),
+    ("/reviews", "Revisiones"),
+    ("/identities", "Identidades"),
+    ("/sync", "Sincronización"),
 ];
 
 /// Text of a filter dropdown: the single choice, a count, or `all`.
@@ -160,7 +160,7 @@ fn summary<K: Ord>(
     match chosen.as_slice() {
         [] => all.to_owned(),
         [one] => (*one).clone(),
-        many => format!("{} selected", many.len()),
+        many => format!("{} seleccionados", many.len()),
     }
 }
 
@@ -188,7 +188,7 @@ pub fn render(store: &Store, now: jiff::Timestamp, page: &Page<'_>, body: Markup
     let period = page.filters.period.clone().unwrap_or_else(|| "30".into());
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="es" {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
@@ -209,18 +209,18 @@ pub fn render(store: &Store, now: jiff::Timestamp, page: &Page<'_>, body: Markup
                         @for (key, value) in page.keep {
                             input type="hidden" name=(key) value=(value);
                         }
-                        label { "Period"
+                        label { "Período"
                             select name="period" {
-                                @for (value, label) in [("7", "Last 7 days"), ("30", "Last 30 days"), ("90", "Last 90 days"), ("custom", "Custom")] {
+                                @for (value, label) in [("7", "Últimos 7 días"), ("30", "Últimos 30 días"), ("90", "Últimos 90 días"), ("custom", "Personalizado")] {
                                     option value=(value) selected[period == value] { (label) }
                                 }
                             }
                         }
-                        label { "From" input type="date" name="start" value=(page.selection.start.to_string()); }
-                        label { "To" input type="date" name="end" value=(page.selection.end.to_string()); }
-                        div.field { "Repositories"
+                        label { "Desde" input type="date" name="start" value=(page.selection.start.to_string()); }
+                        label { "Hasta" input type="date" name="end" value=(page.selection.end.to_string()); }
+                        div.field { "Repositorios"
                             details.pick {
-                                summary.control { (summary(&repository_labels, &page.selection.repositories, "All repositories")) }
+                                summary.control { (summary(&repository_labels, &page.selection.repositories, "Todos los repositorios")) }
                                 div.menu {
                                     @for (id, label) in &repository_labels {
                                         label {
@@ -231,9 +231,9 @@ pub fn render(store: &Store, now: jiff::Timestamp, page: &Page<'_>, body: Markup
                                 }
                             }
                         }
-                        div.field { "Developers"
+                        div.field { "Personas"
                             details.pick {
-                                summary.control { (summary(&developers, &page.selection.developers, "All developers")) }
+                                summary.control { (summary(&developers, &page.selection.developers, "Todas las personas")) }
                                 div.menu {
                                     @for (id, name) in &developers {
                                         label {
@@ -244,11 +244,11 @@ pub fn render(store: &Store, now: jiff::Timestamp, page: &Page<'_>, body: Markup
                                 }
                             }
                         }
-                        button type="submit" { "Apply" }
+                        button type="submit" { "Aplicar" }
                     }
                     @if !stale.is_empty() {
                         div.notice {
-                            "Data may be out of date. Run " code { "kawa sync" } " to refresh."
+                            "Los datos pueden estar desactualizados. Ejecuta " code { "kawa sync" } " para actualizarlos."
                             ul {
                                 @for (path, reason) in &stale {
                                     li { (path) ": " (reason) }
