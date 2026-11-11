@@ -29,6 +29,7 @@ fn options(since: i64, extra_ignored: &[String]) -> ReplayOptions {
         since,
         excluded: engine::path_filter(&[]).unwrap(),
         ignore_revs: extra_ignored.iter().map(|h| oid(h)).collect(),
+        pr_heads: Default::default(),
     }
 }
 
@@ -39,6 +40,7 @@ fn replay_with(fixture: &FixtureRepo, options: &ReplayOptions) -> Replay {
         since: options.since,
         excluded: options.excluded.clone(),
         ignore_revs: options.ignore_revs.clone(),
+        pr_heads: options.pr_heads.clone(),
     };
     options_with_file
         .ignore_revs
@@ -557,5 +559,94 @@ fn file_added_by_an_ignored_revision_has_no_introducer() {
         replay.removals,
         vec![pair(None, &edit, 1)],
         "should treat lines added by an ignored revision as baseline"
+    );
+}
+
+/// A pull request with two commits, squashed onto a main that moved on, then
+/// edited once more. Returns `(first, second, squash, later)`.
+fn squashed_pull_request(fixture: &FixtureRepo) -> (String, String, String, String) {
+    fixture.write("src/a.rs", "a\n");
+    fixture.commit(&ana(), &day(1), "base");
+    fixture.branch("feature");
+    fixture.write("src/new.rs", &lines(0..10));
+    let first = fixture.commit(&luis(), &day(2), "add feature");
+    let reworked = lines(0..10)
+        .replace("line 3\n", "LINE 3\n")
+        .replace("line 4\n", "LINE 4\n");
+    fixture.write("src/new.rs", &reworked);
+    let second = fixture.commit(&luis(), &day(3), "rework");
+    fixture.checkout("main");
+    fixture.write("src/a.rs", "a\nb\n");
+    fixture.commit(&ana(), &day(4), "main moves on");
+    fixture.write("src/new.rs", &reworked);
+    let squash = fixture.commit(&luis(), &day(5), "feat: add feature (#7)");
+    fixture.write("src/new.rs", &reworked.replace("line 8\n", "LINE 8\n"));
+    let later = fixture.commit(&ana(), &day(6), "edit");
+    (first, second, squash, later)
+}
+
+#[test]
+fn squash_commit_recovers_the_commits_of_its_pull_request() {
+    let fixture = FixtureRepo::new();
+    let (first, second, squash, later) = squashed_pull_request(&fixture);
+    let mut with_heads = options(0, &[]);
+    with_heads.pr_heads.insert(7, oid(&second));
+
+    let replay = replay_with(&fixture, &with_heads);
+    let squashed = replay
+        .commits
+        .iter()
+        .find(|c| c.id == oid(&squash))
+        .unwrap();
+    assert!(
+        squashed.is_merge && squashed.files.is_empty(),
+        "should treat the squash as a merge that changes nothing itself, got {squashed:?}"
+    );
+    assert_eq!(
+        files_of(&replay, &first)[0].added,
+        10,
+        "should replay the first commit of the pull request"
+    );
+    let mut expected = vec![
+        pair(Some(&first), &second, 2),
+        pair(Some(&first), &later, 1),
+    ];
+    expected.sort();
+    assert_eq!(
+        replay.removals, expected,
+        "should count the rework inside the pull request and keep its commits as origins"
+    );
+}
+
+#[test]
+fn squash_commit_without_a_known_head_stays_a_plain_commit() {
+    let fixture = FixtureRepo::new();
+    let (_, _, squash, later) = squashed_pull_request(&fixture);
+
+    let replay = replay_all(&fixture);
+    assert_eq!(
+        replay.removals,
+        vec![pair(Some(&squash), &later, 1)],
+        "should attribute the lines to the squash commit when the head is unknown"
+    );
+    assert_eq!(
+        replay.commits.len(),
+        4,
+        "should not replay commits outside the analyzed branch"
+    );
+}
+
+#[test]
+fn head_pushed_after_the_squash_is_ignored() {
+    let fixture = FixtureRepo::new();
+    let (_, _, squash, later) = squashed_pull_request(&fixture);
+    let mut with_heads = options(0, &[]);
+    with_heads.pr_heads.insert(7, oid(&later));
+
+    let replay = replay_with(&fixture, &with_heads);
+    assert_eq!(
+        replay.removals,
+        vec![pair(Some(&squash), &later, 1)],
+        "should ignore a head that descends from the squash commit"
     );
 }

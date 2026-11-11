@@ -40,6 +40,10 @@ exclude = ["docs/generated/**"]
 # Commits handled like .git-blame-ignore-revs entries (bulk formatting, moves).
 ignore_revs = ["0123456789abcdef0123456789abcdef01234567"]
 
+# Replay the commits of each squash-merged pull request instead of the single
+# commit the merge leaves on the branch. See "Squash merges" below.
+pr_branch_commits = true
+
 # Impact weights for changed lines, distinct files and distinct modules.
 # They must be non-negative and sum to 1.0.
 [impact]
@@ -96,6 +100,16 @@ Fundamentals cover non-ignored commits by developers (bots excluded) whose autho
 Work types are computed from stored history whenever kawa syncs, so changing `recency_days`, `timezone`, aliases or the bot pattern applies to all history on the next `kawa sync`.
 
 Every value can be traced to its commits: each commit lists its lines per work type and the earlier commits whose lines it rewrote.
+
+## Squash merges
+
+A squash merge leaves one commit on the branch, authored when the pull request merges. Measured on that commit alone, active days are days with a merge and the rework done inside a pull request is invisible.
+
+With `pr_branch_commits` (the default), `kawa sync` downloads the last pushed head of every merged pull request from GitHub and replays the commits behind each squash commit, with their own authors and dates. The squash commit is recognized by the `(#123)` GitHub appends to its subject and counts as a merge.
+
+- The heads are stored in `<database>.pr-heads/`, a bare repository per GitHub repository that borrows the objects of your clone. Your clone is never written to. Deleting the directory is safe; the next sync downloads the heads again.
+- The fetch runs `git` against the `origin` of the analyzed repository, with whatever credentials already work there.
+- History rewritten before the last push (amend, rebase) is not recoverable: only the final commits of the pull request exist.
 
 ## Review and collaboration
 

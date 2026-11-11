@@ -31,6 +31,9 @@ pub struct Config {
     pub exclude: Vec<String>,
     /// Commits treated like `.git-blame-ignore-revs` entries.
     pub ignore_revs: Vec<String>,
+    /// Replay the commits of each squash-merged pull request instead of its
+    /// single commit on the branch. Needs the pull request heads from GitHub.
+    pub pr_branch_commits: bool,
     pub impact: ImpactWeights,
     pub repositories: Vec<Repository>,
     pub developers: Vec<Developer>,
@@ -48,6 +51,7 @@ impl Default for Config {
             bot_pattern: r"(?i)\[bot\]$".to_owned(),
             exclude: Vec::new(),
             ignore_revs: Vec::new(),
+            pr_branch_commits: true,
             impact: ImpactWeights::default(),
             repositories: Vec::new(),
             developers: Vec::new(),

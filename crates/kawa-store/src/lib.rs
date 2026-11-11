@@ -84,6 +84,18 @@ impl Store {
         Ok(id)
     }
 
+    pub fn repository_id(&self, path: &str) -> Result<Option<i64>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM repositories WHERE path = ?1",
+                [path],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -63,11 +63,11 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     let config = Config::load(cli.config.as_deref()).map_err(|e| e.to_string())?;
-    let mut store = open_store(&config)?;
+    let database = database_path(&config)?;
+    let mut store = open_store(&database)?;
     match cli.command {
         Command::Sync { no_wait } => {
             let now = jiff::Timestamp::now();
-            let outcomes = sync::sync_git(&mut store, &config, now).map_err(|e| e.to_string())?;
             let mut github = GithubSync {
                 token: github_sync::discover_token(),
                 api_url: kawa_github::DEFAULT_API_URL.to_owned(),
@@ -76,6 +76,22 @@ fn run(cli: Cli) -> Result<(), String> {
             let pr_outcomes =
                 github_sync::sync_pull_requests(&mut store, &config, now, &mut github)
                     .map_err(|e| e.to_string())?;
+            // Pull requests first: their head commits feed the git replay.
+            let cache_root = database.with_extension("pr-heads");
+            for sync::PrHeadsOutcome { path, result } in
+                sync::fetch_pr_heads(&store, &config, &cache_root).map_err(|e| e.to_string())?
+            {
+                match result {
+                    Ok(fetched) if fetched.wanted > 0 || fetched.missing > 0 => println!(
+                        "fetched {path}: {} pull request heads, {} unavailable",
+                        fetched.downloaded, fetched.missing
+                    ),
+                    Ok(_) => {}
+                    Err(error) => eprintln!("skipped {path} pull request heads: {error}"),
+                }
+            }
+            let outcomes = sync::sync_git_with(&mut store, &config, now, Some(&cache_root))
+                .map_err(|e| e.to_string())?;
             sync::refresh(&mut store, &config).map_err(|e| e.to_string())?;
             let mut failed = 0;
             for outcome in &pr_outcomes {
@@ -150,16 +166,21 @@ fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
-fn open_store(config: &Config) -> Result<Store, String> {
-    let path = match &config.database {
-        Some(path) => path.clone(),
+fn database_path(config: &Config) -> Result<PathBuf, String> {
+    match &config.database {
+        Some(path) => Ok(path.clone()),
         None => directories::ProjectDirs::from("", "", "kawa")
             .map(|dirs| dirs.data_dir().join("kawa.sqlite"))
-            .ok_or("cannot determine the data directory; set `database` in kawa.toml")?,
-    };
+            .ok_or_else(|| {
+                "cannot determine the data directory; set `database` in kawa.toml".to_owned()
+            }),
+    }
+}
+
+fn open_store(path: &Path) -> Result<Store, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
-    Store::open(&path).map_err(|e| format!("cannot open {}: {e}", path.display()))
+    Store::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))
 }

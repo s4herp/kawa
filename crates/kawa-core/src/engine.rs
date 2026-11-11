@@ -41,6 +41,11 @@ pub struct ReplayOptions {
     pub since: i64,
     pub excluded: GlobSet,
     pub ignore_revs: HashSet<ObjectId>,
+    /// Head commit of each merged pull request, by number. A squash commit
+    /// whose subject ends in `(#N)` is replayed as a merge of its parent and
+    /// that head, so the commits of the pull request keep their authorship,
+    /// dates and the rework between them.
+    pub pr_heads: HashMap<u64, ObjectId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -124,7 +129,7 @@ pub fn replay(
     tip: ObjectId,
     options: &ReplayOptions,
 ) -> Result<Replay, EngineError> {
-    let order = topological_range(repo, tip, options.since)?;
+    let order = topological_range(repo, tip, options)?;
     let mut engine = Engine {
         repo,
         options,
@@ -142,14 +147,27 @@ struct RangeCommit {
     parents: Vec<ObjectId>,
 }
 
-/// Commits reachable from `tip` with committer time at or after `since`, in an
-/// order where every parent comes before its children; ties go to the older
-/// commit, then the smaller id.
-fn topological_range(
+struct Graph {
+    parents: HashMap<ObjectId, Vec<ObjectId>>,
+    times: HashMap<ObjectId, i64>,
+}
+
+/// The pull request number GitHub appends to a squash commit subject.
+fn squashed_pr(subject: &BStr) -> Option<u64> {
+    let subject = subject.to_str_lossy();
+    let number = subject.trim_end().strip_suffix(')')?.rsplit_once("(#")?.1;
+    number.parse().ok()
+}
+
+/// Parents of every commit reachable from `tip` with committer time at or
+/// after `since`, with their commit times. With `pr_heads`, a squash commit
+/// also gets the head of its pull request as a parent.
+fn reachable(
     repo: &gix::Repository,
     tip: ObjectId,
     since: i64,
-) -> Result<Vec<RangeCommit>, EngineError> {
+    pr_heads: Option<&HashMap<u64, ObjectId>>,
+) -> Result<Graph, EngineError> {
     let mut parents: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     let mut times: HashMap<ObjectId, i64> = HashMap::new();
     let mut stack = vec![tip];
@@ -162,15 +180,49 @@ fn topological_range(
         if time < since && id != tip {
             continue;
         }
-        let ids: Vec<ObjectId> = commit.parent_ids().map(|p| p.detach()).collect();
+        let mut ids: Vec<ObjectId> = commit.parent_ids().map(|p| p.detach()).collect();
+        if let (Some(heads), [parent]) = (pr_heads, ids.as_slice()) {
+            let head = squashed_pr(commit.message().map_err(git_err)?.summary().as_ref())
+                .and_then(|number| heads.get(&number))
+                .filter(|head| **head != id && *head != parent);
+            // A head committed after the squash was pushed after the merge and
+            // may descend from it; a head that was never fetched is skipped.
+            if let Some(head) = head
+                && let Ok(head_commit) = repo.find_commit(*head)
+                && head_commit.time().map_err(git_err)?.seconds <= time
+            {
+                ids.push(*head);
+            }
+        }
         stack.extend(ids.iter().copied());
         times.insert(id, time);
         parents.insert(id, ids);
     }
+    Ok(Graph { parents, times })
+}
 
+/// Commits to replay, in an order where every parent comes before its
+/// children; ties go to the older commit, then the smaller id.
+fn topological_range(
+    repo: &gix::Repository,
+    tip: ObjectId,
+    options: &ReplayOptions,
+) -> Result<Vec<RangeCommit>, EngineError> {
+    let graph = reachable(repo, tip, options.since, Some(&options.pr_heads))?;
+    let order = sorted(&graph);
+    if order.len() == graph.parents.len() {
+        return Ok(order);
+    }
+    // A pull request head that descends from its own squash commit makes a
+    // cycle; real history has none, so fall back to it.
+    Ok(sorted(&reachable(repo, tip, options.since, None)?))
+}
+
+fn sorted(graph: &Graph) -> Vec<RangeCommit> {
+    let Graph { parents, times } = graph;
     let mut pending: HashMap<ObjectId, usize> = HashMap::new();
     let mut children: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-    for (id, ids) in &parents {
+    for (id, ids) in parents {
         let in_range: BTreeSet<&ObjectId> =
             ids.iter().filter(|p| parents.contains_key(*p)).collect();
         pending.insert(*id, in_range.len());
@@ -197,7 +249,7 @@ fn topological_range(
             parents: parents[&id].clone(),
         });
     }
-    Ok(order)
+    order
 }
 
 struct Engine<'r> {

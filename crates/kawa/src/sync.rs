@@ -1,6 +1,7 @@
 //! `kawa sync`: replay each configured repository and store the results.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use jiff::{SignedDuration, Timestamp};
 use kawa_core::engine::{self, CommitRecord, Introducer, Replay, ReplayOptions};
@@ -10,6 +11,7 @@ use thiserror::Error;
 
 use crate::config::{Config, Repository};
 use crate::identities;
+use crate::pr_heads::{self, Fetched};
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -34,12 +36,60 @@ pub enum RepositoryOutcome {
     },
 }
 
+#[derive(Debug)]
+pub struct PrHeadsOutcome {
+    pub path: String,
+    pub result: Result<Fetched, String>,
+}
+
 /// Syncs git history for every configured repository. A repository that
 /// fails is recorded and the others continue.
 pub fn sync_git(
     store: &mut Store,
     config: &Config,
     now: Timestamp,
+) -> Result<Vec<RepositoryOutcome>, SyncError> {
+    sync_git_with(store, config, now, None)
+}
+
+/// Downloads the head of every merged pull request stored for each
+/// repository into `cache_root`. Returns one result per repository with a
+/// GitHub name.
+pub fn fetch_pr_heads(
+    store: &Store,
+    config: &Config,
+    cache_root: &Path,
+) -> Result<Vec<PrHeadsOutcome>, SyncError> {
+    let mut results = Vec::new();
+    if !config.pr_branch_commits {
+        return Ok(results);
+    }
+    for repository in &config.repositories {
+        let Some(github) = &repository.github else {
+            continue;
+        };
+        let path = repository.path.display().to_string();
+        let Some(repository_id) = store.repository_id(&path)? else {
+            continue;
+        };
+        let numbers = store.merged_pull_request_numbers(repository_id)?;
+        let cache = pr_heads::cache_path(cache_root, github);
+        let remote = pr_heads::remote_url(&repository.path, github);
+        results.push(PrHeadsOutcome {
+            path,
+            result: pr_heads::fetch(&cache, &repository.path, &remote, &numbers),
+        });
+    }
+    Ok(results)
+}
+
+/// Like [`sync_git`]; with `cache_root`, squash commits are replayed through
+/// the pull request heads found there.
+pub fn sync_git_with(
+    store: &mut Store,
+    config: &Config,
+    now: Timestamp,
+    cache_root: Option<&Path>,
 ) -> Result<Vec<RepositoryOutcome>, SyncError> {
     let excluded =
         engine::path_filter(&config.exclude).map_err(|e| SyncError::Exclude(e.to_string()))?;
@@ -52,7 +102,12 @@ pub fn sync_git(
             repository.branch.as_deref(),
             repository.github.as_deref(),
         )?;
-        match replay_repository(repository, config, &excluded, since) {
+        let cache = cache_root
+            .filter(|_| config.pr_branch_commits)
+            .zip(repository.github.as_deref())
+            .map(|(root, github)| pr_heads::cache_path(root, github))
+            .filter(|cache| cache.join("objects").is_dir());
+        match replay_repository(repository, config, &excluded, since, cache.as_deref()) {
             Ok((head, replay)) => {
                 let (commits, removals) = to_store_inputs(&replay);
                 store.replace_git_history(repository_id, &commits, &removals)?;
@@ -101,6 +156,7 @@ fn replay_repository(
     config: &Config,
     excluded: &globset::GlobSet,
     since: i64,
+    cache: Option<&Path>,
 ) -> Result<(String, Replay), String> {
     let opened = repo::open(&repository.path).map_err(|e| e.to_string())?;
     let tip = repo::branch_tip(&opened, repository.branch.as_deref()).map_err(|e| e.to_string())?;
@@ -116,8 +172,15 @@ fn replay_repository(
         since,
         excluded: excluded.clone(),
         ignore_revs,
+        pr_heads: cache.map(pr_heads::read).unwrap_or_default(),
     };
-    let replay = engine::replay(&opened, tip.id, &options).map_err(|e| e.to_string())?;
+    // The cache borrows the repository's objects and adds the pull request
+    // commits, so it can stand in for the repository during the replay.
+    let objects = match cache {
+        Some(cache) => repo::open(cache).map_err(|e| e.to_string())?,
+        None => opened.clone(),
+    };
+    let replay = engine::replay(&objects, tip.id, &options).map_err(|e| e.to_string())?;
     Ok((tip.id.to_string(), replay))
 }
 

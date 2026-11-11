@@ -109,6 +109,20 @@ impl Store {
     }
 
     /// Counts of stored rows as `(pull_requests, commits, reviews, comments, events)`.
+    /// Numbers of the merged pull requests stored for a repository.
+    pub fn merged_pull_request_numbers(&self, repository_id: i64) -> Result<Vec<u64>> {
+        let mut statement = self.conn().prepare(
+            "SELECT number FROM pull_requests
+             WHERE repository_id = ?1 AND merged_at IS NOT NULL ORDER BY number",
+        )?;
+        let rows = statement.query_map([repository_id], |row| row.get::<_, i64>(0))?;
+        Ok(rows
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .map(|n| n as u64)
+            .collect())
+    }
+
     pub fn pull_request_counts(&self, repository_id: i64) -> Result<(u64, u64, u64, u64, u64)> {
         let count = |table: &str| -> Result<u64> {
             Ok(self.conn().query_row(

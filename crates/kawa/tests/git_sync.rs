@@ -185,3 +185,75 @@ fn boundary_includes_window_and_recency() {
         "should start replay 180 + 21 days before now"
     );
 }
+
+#[test]
+fn squashed_pull_request_is_replayed_through_its_fetched_head() {
+    let fixture = FixtureRepo::new();
+    let ana = Author::new("Ana", "ana@example.com");
+    fixture.write("src/a.rs", "a\n");
+    fixture.commit(&ana, "2026-11-01T10:00:00+00:00", "base");
+    fixture.branch("feature");
+    fixture.write("src/new.rs", "one\ntwo\nthree\n");
+    fixture.commit(&ana, "2026-11-02T10:00:00+00:00", "add feature");
+    fixture.write("src/new.rs", "one\nTWO\nthree\n");
+    let head = fixture.commit(&ana, "2026-11-03T10:00:00+00:00", "rework");
+    fixture.checkout("main");
+    fixture.write("src/new.rs", "one\nTWO\nthree\n");
+    fixture.commit(&ana, "2026-11-04T10:00:00+00:00", "feat: add feature (#7)");
+    // What GitHub serves for the pull request, kept in a separate remote.
+    let remote = FixtureRepo::new();
+    remote.git(&[
+        "fetch",
+        "--quiet",
+        fixture.path().to_str().unwrap(),
+        "feature",
+    ]);
+    remote.git(&["update-ref", "refs/pull/7/head", &head]);
+
+    let scratch = tempfile::tempdir().unwrap();
+    let cache = kawa::pr_heads::cache_path(scratch.path(), "acme/app");
+    let fetched = kawa::pr_heads::fetch(
+        &cache,
+        fixture.path(),
+        remote.path().to_str().unwrap(),
+        &[7, 8],
+    )
+    .unwrap();
+    assert_eq!(
+        (fetched.downloaded, fetched.missing),
+        (1, 1),
+        "should download the head that exists and report the one that does not"
+    );
+    assert!(
+        fixture.git(&["for-each-ref", "refs/pull/"]).is_empty(),
+        "should not write refs into the analyzed repository"
+    );
+
+    let mut store = Store::open_in_memory().unwrap();
+    let config = Config {
+        timezone: Some("UTC".into()),
+        repositories: vec![Repository {
+            path: fixture.path().to_path_buf(),
+            branch: Some("main".into()),
+            github: Some("acme/app".into()),
+        }],
+        ..Config::default()
+    };
+    let synced_at: Timestamp = "2026-11-10T00:00:00Z".parse().unwrap();
+    sync::sync_git_with(&mut store, &config, synced_at, Some(scratch.path())).unwrap();
+    sync::refresh(&mut store, &config).unwrap();
+    let selection = kawa_store::Selection {
+        start: "2026-11-01".parse().unwrap(),
+        end: "2026-11-09".parse().unwrap(),
+        repositories: Default::default(),
+        developers: Default::default(),
+    };
+    let rows = store
+        .fundamentals(&selection, &config.impact_settings())
+        .unwrap();
+    assert_eq!(
+        (rows[0].commits, rows[0].active_days, rows[0].work.churn),
+        (3, 3, 1),
+        "should count the commits of the pull request on their own days and the line reworked between them"
+    );
+}
