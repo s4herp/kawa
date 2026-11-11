@@ -201,12 +201,19 @@ impl PrData {
         let mut pending_since: Option<Timestamp> = None;
         let mut samples = Vec::new();
         for (at, kind, developer) in &timeline {
+            if merged_at.is_some_and(|m| *at > m) {
+                break;
+            }
             let by_author = developer.is_some() && *developer == self.author;
             if self.is_other(developer) {
                 if *kind == 1 {
                     reviewed_since_commit = true;
                 }
-                pending_since.get_or_insert(*at);
+                // Only feedback waits for the author; a commit someone else
+                // pushes to the PR does not.
+                if *kind != 0 {
+                    pending_since.get_or_insert(*at);
+                }
             } else if by_author {
                 if *kind == 0 && reviewed_since_commit {
                     iterations += 1;
@@ -220,9 +227,6 @@ impl PrData {
                         seconds: at.as_second() - since.as_second(),
                     });
                 }
-            }
-            if merged_at.is_some_and(|m| *at > m) {
-                break;
             }
         }
 

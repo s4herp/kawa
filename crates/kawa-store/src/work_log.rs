@@ -188,12 +188,14 @@ impl Store {
 
         for (sql, is_review) in [
             (
-                "SELECT r.repository_id, r.number, r.author_login, r.submitted_at, p.title, p.url, r.state
+                "SELECT r.repository_id, r.number, r.author_login, r.submitted_at, p.title, p.url, r.state,
+                        p.author_login, 'review'
                  FROM reviews r JOIN pull_requests p ON p.repository_id = r.repository_id AND p.number = r.number",
                 true,
             ),
             (
-                "SELECT c.repository_id, c.number, c.author_login, c.created_at, p.title, p.url, NULL
+                "SELECT c.repository_id, c.number, c.author_login, c.created_at, p.title, p.url, NULL,
+                        p.author_login, c.kind
                  FROM comments c JOIN pull_requests p ON p.repository_id = c.repository_id AND p.number = c.number",
                 false,
             ),
@@ -208,12 +210,28 @@ impl Store {
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(7)?,
+                    r.get::<_, String>(8)?,
                 ))
             })? {
-                let (repository_id, number, login, at, title, url, state) = row?;
+                let (repository_id, number, login, at, title, url, state, pr_author, kind) = row?;
                 let Some(developer_id) = resolve(&logins, &login) else {
                     continue;
                 };
+                let own_pr = pr_author
+                    .and_then(|author| resolve(&logins, &author))
+                    .is_some_and(|author| author == developer_id);
+                // GitHub wraps an author's thread replies in a review of their
+                // own PR, and a reviewer's inline comments in the review that
+                // is already counted: each activity counts once.
+                let counted = match (is_review, kind.as_str()) {
+                    (true, _) => !own_pr,
+                    (false, "review") => own_pr,
+                    (false, _) => true,
+                };
+                if !counted {
+                    continue;
+                }
                 let at = parse(at)?;
                 items.push(WorkLogItem {
                     developer_id,

@@ -398,3 +398,97 @@ fn pr_detail_lists_the_events_used() {
         "should show the computed timings"
     );
 }
+
+#[test]
+fn commit_pushed_by_someone_else_does_not_start_the_responsiveness_clock() {
+    let mut p = pr(
+        1,
+        "ana",
+        "2026-11-02T08:00:00Z",
+        "2026-11-02T09:00:00Z",
+        Some("2026-11-02T18:00:00Z"),
+    );
+    p.commits.push(commit(1, 1, "luis", "2026-11-02T10:00:00Z"));
+    p.reviews = vec![review(
+        "R1",
+        "luis",
+        "CHANGES_REQUESTED",
+        "2026-11-02T13:00:00Z",
+    )];
+    p.commits.push(commit(1, 2, "ana", "2026-11-02T15:00:00Z"));
+    let store = store_with(vec![p]);
+
+    let summary = store.review_summary(&november()).unwrap();
+    let ana = summary
+        .authors
+        .iter()
+        .find(|a| a.developer_id == "ana@example.com")
+        .expect("Ana authored the PR");
+    assert_eq!(
+        ana.responsiveness.map(|a| a.median),
+        Some(2.0 * HOUR),
+        "should start the clock at Luis's review, not at his commit"
+    );
+}
+
+#[test]
+fn activity_after_the_merge_is_not_a_response() {
+    let mut p = pr(
+        1,
+        "ana",
+        "2026-11-02T08:00:00Z",
+        "2026-11-02T09:00:00Z",
+        Some("2026-11-02T18:00:00Z"),
+    );
+    p.reviews = vec![review("R1", "luis", "APPROVED", "2026-11-02T13:00:00Z")];
+    p.comments = vec![comment("C1", "ana", "2026-11-02T19:00:00Z")];
+    let store = store_with(vec![p]);
+
+    let summary = store.review_summary(&november()).unwrap();
+    assert_eq!(
+        summary.authors[0].responsiveness, None,
+        "should not count Ana's comment after the merge as a response"
+    );
+}
+
+#[test]
+fn work_log_counts_each_review_activity_once() {
+    let mut p = pr(
+        1,
+        "ana",
+        "2026-11-02T08:00:00Z",
+        "2026-11-02T09:00:00Z",
+        Some("2026-11-02T18:00:00Z"),
+    );
+    let inline = |id: &str, login: &str, when: &str| Comment {
+        kind: CommentKind::Review,
+        ..comment(id, login, when)
+    };
+    p.reviews = vec![
+        review("R1", "luis", "COMMENTED", "2026-11-02T13:00:00Z"),
+        // GitHub wraps Ana's reply in the thread in a review of her own PR.
+        review("R2", "ana", "COMMENTED", "2026-11-02T14:00:00Z"),
+    ];
+    p.comments = vec![
+        inline("C1", "luis", "2026-11-02T13:00:00Z"),
+        inline("C2", "ana", "2026-11-02T14:00:00Z"),
+        comment("C3", "luis", "2026-11-02T15:00:00Z"),
+    ];
+    let store = store_with(vec![p]);
+
+    let grid = store
+        .work_log(&november(), &jiff::tz::TimeZone::UTC)
+        .unwrap();
+    let ana = &grid["ana@example.com"]["2026-11-02"];
+    let luis = &grid["gh:luis"]["2026-11-02"];
+    assert_eq!(
+        (ana.reviews, ana.comments),
+        (0, 1),
+        "should count Ana's reply on her own PR as one comment and no review"
+    );
+    assert_eq!(
+        (luis.reviews, luis.comments),
+        (1, 1),
+        "should count Luis's review once, plus his separate comment"
+    );
+}

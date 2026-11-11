@@ -137,9 +137,8 @@ fn run(cli: Cli) -> Result<(), String> {
             return Ok(());
         }
         Command::Identities { format } => {
-            let rules = identities::rules_from_config(&config).map_err(|e| e.to_string())?;
-            identities::resolve(&mut store, &rules, &identities::developer_specs(&config))
-                .map_err(|e| e.to_string())?;
+            // Derived tables are keyed by developer, so they follow the identities.
+            sync::refresh(&mut store, &config).map_err(|e| e.to_string())?;
             let entries = identities::audit(&store).map_err(|e| e.to_string())?;
             let output = match format {
                 Format::Json => identities::render_json(entries),
