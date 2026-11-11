@@ -93,6 +93,7 @@ pub struct Replay {
 /// Built-in exclusions: lockfiles, vendored and generated code.
 pub const DEFAULT_EXCLUDES: &[&str] = &[
     "**/*.lock",
+    "**/*.lock.hcl",
     "**/package-lock.json",
     "**/npm-shrinkwrap.json",
     "**/pnpm-lock.yaml",
@@ -202,7 +203,9 @@ fn topological_range(
 struct Engine<'r> {
     repo: &'r gix::Repository,
     options: &'r ReplayOptions,
-    blob_index: HashMap<ObjectId, u32>,
+    /// Baseline files seen so far; identical blobs at different paths are
+    /// different files and must not share line ids.
+    blob_index: HashMap<(BString, ObjectId), u32>,
     /// Commit index (into `commits`) that introduced each non-baseline line id.
     introducers: Vec<u32>,
     /// Earliest removing commit index per line id.
@@ -251,7 +254,13 @@ impl Engine<'_> {
             let introduced = if line & BASELINE_BIT != 0 {
                 Introducer::Baseline
             } else {
-                Introducer::Commit(self.commits[self.introducers[*line as usize] as usize].id)
+                let introducer = &self.commits[self.introducers[*line as usize] as usize];
+                // An ignored revision emits no events, so it introduces nothing.
+                if introducer.is_ignored {
+                    Introducer::Baseline
+                } else {
+                    Introducer::Commit(introducer.id)
+                }
             };
             *pairs
                 .entry((introduced, self.commits[*remover as usize].id))
@@ -494,15 +503,33 @@ impl Engine<'_> {
             if self.is_excluded(path.as_ref()) {
                 continue;
             }
+            let result_blob = blob_at(tree, path.as_ref())?;
+            let mut parent_blobs = Vec::with_capacity(parent_trees.len());
+            for parent_tree in parent_trees {
+                parent_blobs.push(blob_at(parent_tree, path.as_ref())?);
+            }
+            // A path the merge left exactly as one parent had it is that
+            // parent's history, not a change by the merge: adopt its origins.
+            if let Some(same) = parent_blobs.iter().position(|blob| *blob == result_blob) {
+                match parent_states[same].get(&path) {
+                    Some(origins) if result_blob.is_some() => {
+                        state.insert(path.clone(), origins.clone());
+                    }
+                    _ => {
+                        state.remove(&path);
+                    }
+                }
+                continue;
+            }
             let mut parents = Vec::new();
-            for (parent_tree, parent_state) in parent_trees.iter().zip(&parent_states) {
-                if let Some(blob) = blob_at(parent_tree, path.as_ref())?
-                    && let Some(version) = self.version(parent_state, path.as_ref(), blob)?
+            for (blob, parent_state) in parent_blobs.iter().zip(&parent_states) {
+                if let Some(blob) = blob
+                    && let Some(version) = self.version(parent_state, path.as_ref(), *blob)?
                 {
                     parents.push(version);
                 }
             }
-            let new_keys = match blob_at(tree, path.as_ref())? {
+            let new_keys = match result_blob {
                 Some(blob) => self.keys(blob)?,
                 None => None,
             };
@@ -531,9 +558,13 @@ impl Engine<'_> {
             };
 
             let mut origins: Vec<Option<LineId>> = vec![None; new_keys.len()];
+            // Ids of every parent line that survives, including the ones a
+            // result line did not take because another parent matched first.
+            let mut surviving: HashSet<LineId> = HashSet::new();
             for parent in &parents {
                 for (old_line, new_line) in unchanged_pairs(&parent.keys, &new_keys) {
                     origins[new_line].get_or_insert(parent.origins[old_line]);
+                    surviving.insert(parent.origins[old_line]);
                 }
             }
             let mut added = 0u32;
@@ -546,9 +577,8 @@ impl Engine<'_> {
                     })
                 })
                 .collect();
-            let kept: HashSet<LineId> = origins.iter().copied().collect();
             let mut removed = 0u32;
-            for line in previous.difference(&kept) {
+            for line in previous.difference(&surviving) {
                 if self.removed_by_merge(*line, index) {
                     removed += 1;
                 }
@@ -671,7 +701,10 @@ impl Engine<'_> {
             Some(origins) if origins.len() == keys.len() => origins.clone(),
             _ => {
                 let next = self.blob_index.len() as u32;
-                let blob_number = *self.blob_index.entry(blob).or_insert(next);
+                let blob_number = *self
+                    .blob_index
+                    .entry((path.to_owned(), blob))
+                    .or_insert(next);
                 (0..keys.len() as u64)
                     .map(|line| BASELINE_BIT | (u64::from(blob_number) << 32) | line)
                     .collect()

@@ -446,3 +446,116 @@ fn replay_is_deterministic() {
     let ids: HashSet<_> = first.commits.iter().map(|c| c.id).collect();
     assert_eq!(ids.len(), 4, "should replay every commit once");
 }
+
+fn removed_by(replay: &Replay, sha: &str) -> u64 {
+    replay
+        .removals
+        .iter()
+        .filter(|p| p.removed == oid(sha))
+        .map(|p| p.lines)
+        .sum()
+}
+
+#[test]
+fn merge_that_takes_one_side_of_twice_committed_content_removes_nothing() {
+    let fixture = FixtureRepo::new();
+    fixture.write("README.md", "hi\n");
+    fixture.commit(&ana(), &day(1), "base");
+    fixture.branch("copy");
+    fixture.write("doc.md", &lines(0..20));
+    fixture.commit(&ana(), &day(2), "add doc on the copy");
+    let edited = lines(0..20).replace("line 5\n", "LINE 5\n");
+    fixture.write("doc.md", &edited);
+    fixture.commit(&ana(), &day(2), "edit one line on the copy");
+    fixture.checkout("main");
+    fixture.write("doc.md", &lines(0..20));
+    fixture.commit(&ana(), &day(3), "add the same doc on main");
+    let merge = fixture.merge("copy", &ana(), &day(4), "merge", &[("doc.md", &edited)]);
+    fixture.write("doc.md", &edited.replace("line 9\n", "LINE 9\n"));
+    let later = fixture.commit(&luis(), &day(5), "edit after merge");
+
+    let replay = replay_all(&fixture);
+    assert!(
+        files_of(&replay, &merge).is_empty(),
+        "should record no changes for a merge whose result is one parent's file"
+    );
+    assert_eq!(
+        removed_by(&replay, &merge),
+        0,
+        "should not charge the merge with the other parent's copy of the lines"
+    );
+    assert_eq!(
+        removed_by(&replay, &later),
+        1,
+        "should still count the rewrite that follows the merge"
+    );
+}
+
+#[test]
+fn rename_on_a_branch_survives_a_merge_commit() {
+    let fixture = FixtureRepo::new();
+    fixture.write("a.txt", &lines(0..20));
+    fixture.write("other.txt", "x\n");
+    let base = fixture.commit(&ana(), &day(1), "base");
+    fixture.branch("feature");
+    fixture.rename("a.txt", "b.txt");
+    fixture.commit(&luis(), &day(2), "rename");
+    fixture.checkout("main");
+    fixture.write("other.txt", "y\n");
+    fixture.commit(&ana(), &day(3), "main edit");
+    let merge = fixture.merge("feature", &ana(), &day(4), "merge", &[]);
+    fixture.write("b.txt", &lines(0..20).replace("line 5\n", "LINE 5\n"));
+    let later = fixture.commit(&luis(), &day(5), "edit after merge");
+
+    let replay = replay_all(&fixture);
+    assert_eq!(
+        removed_by(&replay, &merge),
+        0,
+        "should not charge the merge with the renamed file"
+    );
+    assert!(
+        replay.removals.contains(&pair(Some(&base), &later, 1)),
+        "should keep the original origin through the rename and the merge, got {:?}",
+        replay.removals
+    );
+}
+
+#[test]
+fn identical_files_before_the_boundary_keep_separate_lines() {
+    let fixture = FixtureRepo::new();
+    fixture.write("dev/a.txt", &lines(0..10));
+    fixture.write("prod/a.txt", &lines(0..10));
+    fixture.commit(&ana(), &day(1), "old");
+    let edited = lines(0..10).replace("line 3\n", "LINE 3\n");
+    fixture.write("dev/a.txt", &edited);
+    let dev = fixture.commit(&ana(), &day(15), "edit dev");
+    fixture.write("prod/a.txt", &edited);
+    let prod = fixture.commit(&luis(), &day(16), "edit prod");
+
+    // 2026-01-10T10:00:00Z, between the old commit and the edits.
+    let replay = replay_with(&fixture, &options(1_768_039_200, &[]));
+    let mut expected = vec![pair(None, &dev, 1), pair(None, &prod, 1)];
+    expected.sort();
+    assert_eq!(
+        replay.removals, expected,
+        "should count one baseline line per file even when both files are the same blob"
+    );
+}
+
+#[test]
+fn file_added_by_an_ignored_revision_has_no_introducer() {
+    let fixture = FixtureRepo::new();
+    fixture.write("src/a.rs", "a\n");
+    fixture.commit(&ana(), &day(1), "base");
+    fixture.write("src/generated.rs", "one\ntwo\n");
+    let bulk = fixture.commit(&luis(), &day(2), "bulk import");
+    fixture.write("src/generated.rs", "one\nTWO\n");
+    let edit = fixture.commit(&ana(), &day(3), "edit imported line");
+
+    let replay = replay_with(&fixture, &options(0, &[bulk]));
+    assert_eq!(
+        replay.removals,
+        vec![pair(None, &edit, 1)],
+        "should treat lines added by an ignored revision as baseline"
+    );
+}
